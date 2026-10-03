@@ -42,6 +42,12 @@ type PublicSettings = {
   searchResultsPerQuery: number;
 };
 
+type LoadedLmStudioModel = {
+  id: string;
+  label: string;
+  loadedInstances: number;
+};
+
 type DiscoveryPlan = {
   aiUsed: boolean;
   additionalNiches: string[];
@@ -177,6 +183,11 @@ export function LinkTideDashboard() {
     "unknown" | "testing" | "connected" | "missing" | "error"
   >("unknown");
   const [lmMessage, setLmMessage] = useState("Not tested yet");
+  const [loadedModels, setLoadedModels] = useState<LoadedLmStudioModel[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelMessage, setModelMessage] = useState(
+    "Enter your LM Studio tunnel to detect loaded models."
+  );
   const [workerState, setWorkerState] = useState<WorkerState>("checking");
   const [workerMessage, setWorkerMessage] = useState("Starting LinkTide service...");
   const [discovering, setDiscovering] = useState(false);
@@ -213,6 +224,29 @@ export function LinkTideDashboard() {
 
     void Promise.all([testWorker(), loadSettings()]);
   }, []);
+
+  useEffect(() => {
+    const baseUrl = settings.lmStudioBaseUrl.trim();
+
+    if (!baseUrl) {
+      setLoadedModels([]);
+      setModelMessage("Enter your LM Studio tunnel to detect loaded models.");
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void refreshLmStudioModels(baseUrl, settings.lmStudioApiKey);
+    }, 700);
+
+    const interval = window.setInterval(() => {
+      void refreshLmStudioModels(baseUrl, settings.lmStudioApiKey);
+    }, 15_000);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [settings.lmStudioBaseUrl, settings.lmStudioApiKey]);
 
   const isReady = useMemo(
     () =>
@@ -299,6 +333,7 @@ export function LinkTideDashboard() {
           ? "Settings saved on this Mac."
           : "Add your LM Studio and Brave Search settings."
       );
+      void refreshLmStudioModels(result.lmStudioBaseUrl ?? "", "");
     } catch (caught) {
       setSettingsMessage(
         caught instanceof Error ? caught.message : "Could not load settings."
@@ -330,6 +365,7 @@ export function LinkTideDashboard() {
         braveSearchApiKey: ""
       }));
       setSettingsMessage("Saved locally. Secret fields were cleared from the screen.");
+      await refreshLmStudioModels(result.lmStudioBaseUrl ?? "", "");
       await testWorker();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save settings.");
@@ -363,6 +399,84 @@ export function LinkTideDashboard() {
     } catch {
       setWorkerState("offline");
       setWorkerMessage("Local LinkTide service is unavailable. Restart the app.");
+    }
+  }
+
+  async function refreshLmStudioModels(
+    baseUrl = settings.lmStudioBaseUrl,
+    apiKey = settings.lmStudioApiKey
+  ) {
+    if (!baseUrl.trim()) {
+      setLoadedModels([]);
+      setModelMessage("Enter your LM Studio tunnel to detect loaded models.");
+      return;
+    }
+
+    setLoadingModels(true);
+
+    try {
+      const response = await fetch(`${workerUrl}/lm-studio/models`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: baseUrl.trim(),
+          apiKey: apiKey.trim()
+        })
+      });
+
+      const result = (await response.json()) as {
+        models?: LoadedLmStudioModel[];
+        count?: number;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Could not detect loaded LM Studio models.");
+      }
+
+      const models = Array.isArray(result.models) ? result.models : [];
+      setLoadedModels(models);
+
+      if (!models.length) {
+        setModelMessage("No loaded LLMs detected. Load a model in LM Studio.");
+        return;
+      }
+
+      setModelMessage(
+        `${models.length} loaded ${models.length === 1 ? "model" : "models"} detected.`
+      );
+
+      setSettings((current) => {
+        const selected = models.some(
+          (model) => model.id === current.lmStudioModel
+        )
+          ? current.lmStudioModel
+          : models[0].id;
+
+        if (selected !== current.lmStudioModel) {
+          void fetch(`${workerUrl}/settings`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ lmStudioModel: selected })
+          }).then(async (saveResponse) => {
+            if (saveResponse.ok) {
+              const saved = (await saveResponse.json()) as PublicSettings;
+              setPublicSettings(saved);
+            }
+          });
+        }
+
+        return { ...current, lmStudioModel: selected };
+      });
+    } catch (caught) {
+      setLoadedModels([]);
+      setModelMessage(
+        caught instanceof Error
+          ? caught.message
+          : "Could not detect loaded LM Studio models."
+      );
+    } finally {
+      setLoadingModels(false);
     }
   }
 
@@ -640,8 +754,8 @@ export function LinkTideDashboard() {
         <div className="setupBanner">
           <strong>Finish LinkTide setup</strong>
           <span>
-            Add your LM Studio tunnel/model and Brave Search API key in Settings.
-            No Terminal is required.
+            Add your LM Studio tunnel and Brave Search API key in Settings.
+            Loaded models will appear automatically in the model dropdown.
           </span>
         </div>
       ) : null}
@@ -772,11 +886,38 @@ export function LinkTideDashboard() {
               </label>
               <label>
                 LM Studio model
-                <input
-                  value={settings.lmStudioModel}
-                  onChange={(e) => updateSetting("lmStudioModel", e.target.value)}
-                  placeholder="your-loaded-model"
-                />
+                {loadedModels.length ? (
+                  <select
+                    value={settings.lmStudioModel}
+                    onChange={(e) => updateSetting("lmStudioModel", e.target.value)}
+                  >
+                    {loadedModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                        {model.loadedInstances > 1
+                          ? ` (${model.loadedInstances} instances)`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={settings.lmStudioModel}
+                    onChange={(e) => updateSetting("lmStudioModel", e.target.value)}
+                    placeholder="No loaded model detected yet"
+                  />
+                )}
+                <span className="modelHelper">
+                  <small>{loadingModels ? "Checking LM Studio..." : modelMessage}</small>
+                  <button
+                    className="modelRefresh"
+                    type="button"
+                    onClick={() => refreshLmStudioModels()}
+                    disabled={loadingModels || !settings.lmStudioBaseUrl.trim()}
+                  >
+                    {loadingModels ? "Checking..." : "Refresh Models"}
+                  </button>
+                </span>
               </label>
               <label>
                 LM Studio API key
