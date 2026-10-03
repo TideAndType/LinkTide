@@ -136,6 +136,7 @@ async function submitJob(input: {
 }) {
   const context = await getBrowser();
   const { page, inspection } = await inspectOpportunity(context, input.url);
+  let leaveOpenForHuman = false;
 
   try {
     const form =
@@ -175,8 +176,11 @@ async function submitJob(input: {
       decision
     });
 
+    leaveOpenForHuman = !submission.submitted;
+
     return {
       ...submission,
+      browserLeftOpen: leaveOpenForHuman,
       inspection,
       selectedFormIndex: form.formIndex,
       aiUsed: mapped.aiUsed,
@@ -186,7 +190,9 @@ async function submitJob(input: {
       decision
     };
   } finally {
-    await page.close();
+    if (!leaveOpenForHuman) {
+      await page.close();
+    }
   }
 }
 
