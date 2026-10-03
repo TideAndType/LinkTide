@@ -287,13 +287,25 @@ async function inspectJob(input: {
   }
 }
 
+type AccountResolution = {
+  handled: boolean;
+  authenticated: boolean;
+  status?: "verification_required" | "human_action_required" | "failed";
+  reason?: string;
+  checkpoints?: string[];
+  existingCredential?: boolean;
+  accountCreated?: boolean;
+  accountStatus?: "logged_in" | "created";
+  verificationPending?: boolean;
+};
+
 async function resolveAccount(input: {
   page: Page;
   inspection: OpportunityInspection;
   domain: string;
   business: BusinessSubmissionProfile;
   allowCreate: boolean;
-}) {
+}): Promise<AccountResolution> {
   if (!input.inspection.checkpoints.includes("account_auth")) {
     return {
       handled: false as const,
@@ -430,9 +442,7 @@ async function submitJob(input: {
   let page = opened.page;
   let inspection = opened.inspection;
   let leaveOpenForHuman = false;
-  let account:
-    | Awaited<ReturnType<typeof resolveAccount>>
-    | undefined;
+  let account: AccountResolution | undefined;
 
   try {
     if (inspection.checkpoints.includes("account_auth")) {
