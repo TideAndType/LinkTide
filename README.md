@@ -78,6 +78,33 @@ The current discovery run:
 
 A queued opportunity still needs site inspection before automated submission. CAPTCHA, payment, verification, and agreements remain human checkpoints.
 
+## Local browser worker
+
+The browser automation worker runs on the same computer as Chromium so it can keep directory logins, open real browser tabs, upload local files, and hand control back to you when a site needs human action.
+
+```bash
+pnpm install
+pnpm install:browsers
+cp .env.example .env
+
+# terminal 1
+pnpm worker
+
+# terminal 2
+pnpm dev
+```
+
+The dashboard talks to the local worker at `http://127.0.0.1:4317` by default.
+
+For each qualified opportunity:
+
+- **Inspect** opens the candidate, looks for a likely Add Business / Submit Listing path, reads the form, and maps it to the saved business profile.
+- **Fill & Submit** fills safe mapped fields and submits only when mapping confidence is at least 90%, all required fields are mapped, and no human checkpoint is detected.
+- CAPTCHA, login/password, verification codes, required legal agreements, payment flows, or low-confidence mappings stop submission and leave the browser tab open for manual action.
+- Payment/card fields, passwords, consent checkboxes, and verification fields are never automatically filled.
+
+Set `LINKTIDE_AUTO_SUBMIT=false` to keep global auto-submit off. The dashboard's **Fill & Submit** button explicitly requests auto-submit for that one job, but the same safety gates still apply.
+
 ## Status
 
 Initial project scaffold.

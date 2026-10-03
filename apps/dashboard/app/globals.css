@@ -390,3 +390,61 @@ code {
   .stats { grid-template-columns: 1fr; }
   .shell { width: min(100% - 24px, 1240px); padding-top: 30px; }
 }
+
+.opportunityActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 15px;
+  flex-wrap: wrap;
+}
+
+.smallButton {
+  padding: 8px 12px;
+  font-size: .76rem;
+}
+
+.automationResult {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 13px;
+  border: 1px solid rgba(98, 226, 188, .12);
+  background: rgba(98, 226, 188, .035);
+}
+
+.automationResultHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  text-transform: capitalize;
+}
+
+.automationFacts {
+  display: flex;
+  gap: 12px 18px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  color: #91a8a1;
+  font-size: .76rem;
+}
+
+.automationFacts b {
+  color: #dff7ef;
+}
+
+.automationUrl {
+  overflow-wrap: anywhere;
+  margin: 10px 0 0;
+}
+
+.automationWarning {
+  margin: 10px 0 0;
+  color: #f1cf77;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.status.warn {
+  background: rgba(239, 197, 92, .11);
+  color: #f1cf77;
+}
