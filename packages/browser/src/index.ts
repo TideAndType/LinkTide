@@ -314,6 +314,76 @@ export async function findSubmissionLink(
   return scored[0]?.score >= 6 ? scored[0] : undefined;
 }
 
+export async function findAccountCreationLink(
+  page: Page
+): Promise<SubmissionLinkCandidate | undefined> {
+  const current = new URL(page.url());
+
+  const candidates = await page.locator("a[href]").evaluateAll((anchors) =>
+    anchors.slice(0, 300).map((anchor) => {
+      const el = anchor as HTMLAnchorElement;
+      return {
+        text: (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 180),
+        href: el.href
+      };
+    })
+  );
+
+  const positive = [
+    ["create account", 16],
+    ["sign up", 16],
+    ["signup", 16],
+    ["register", 14],
+    ["create profile", 12],
+    ["join now", 10],
+    ["new account", 12],
+    ["get started", 7]
+  ] as const;
+
+  const negative = [
+    "login",
+    "log in",
+    "sign in",
+    "forgot",
+    "privacy",
+    "terms",
+    "checkout",
+    "pricing",
+    "subscribe"
+  ];
+
+  const scored = candidates
+    .map((candidate) => {
+      try {
+        const url = new URL(candidate.href);
+        if (!["http:", "https:"].includes(url.protocol)) return null;
+
+        const haystack = `${candidate.text} ${url.pathname} ${url.search}`.toLowerCase();
+        let score = url.hostname === current.hostname ? 3 : 0;
+
+        for (const [term, weight] of positive) {
+          if (haystack.includes(term)) score += weight;
+        }
+
+        for (const term of negative) {
+          if (haystack.includes(term)) score -= 10;
+        }
+
+        return {
+          text: candidate.text || url.pathname,
+          url: url.toString(),
+          score
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((candidate): candidate is SubmissionLinkCandidate => Boolean(candidate))
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.score >= 8 ? scored[0] : undefined;
+}
+
 export async function inspectOpportunity(
   context: BrowserContext,
   requestedUrl: string
