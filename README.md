@@ -82,21 +82,23 @@ A queued opportunity still needs site inspection before automated submission. CA
 
 The browser automation worker runs on the same computer as Chromium so it can keep directory logins, open real browser tabs, upload local files, and hand control back to you when a site needs human action.
 
+### One-command install
+
+On macOS/Linux, clone the repo and run:
+
 ```bash
-pnpm install
-pnpm install:browsers
-cp .env.example .env
-
-# Generate a local credential-encryption key and paste it into
-# LINKTIDE_VAULT_KEY in .env
-pnpm worker:key
-
-# terminal 1
-pnpm worker
-
-# terminal 2
-pnpm dev
+bash install.sh
 ```
+
+The installer handles dependencies, Chromium, `.env` creation, the local data directory, and generation of the encrypted credential-vault key.
+
+Then add your LM Studio and Brave Search settings to `.env` and start all of LinkTide from **one terminal**:
+
+```bash
+pnpm start
+```
+
+That one command starts both the local Playwright worker and the dashboard. Press **Ctrl+C** once to stop both.
 
 The dashboard talks to the local worker at `http://127.0.0.1:4317` by default.
 

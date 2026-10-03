@@ -2,6 +2,8 @@
   "name": "linktide",
   "private": true,
   "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "start": "node scripts/start.mjs",
     "dev": "pnpm --filter @linktide/dashboard dev",
     "worker": "pnpm --filter @linktide/worker serve",
     "worker:doctor": "pnpm --filter @linktide/worker doctor",
