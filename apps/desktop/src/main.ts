@@ -6,10 +6,10 @@ import {
   shell,
   type MenuItemConstructorOptions
 } from "electron";
-import { autoUpdater } from "electron-updater";
 import { createServer, type Server } from "node:http";
-import { existsSync, createReadStream } from "node:fs";
+import { existsSync, createReadStream, createWriteStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { extname, join, normalize, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -211,38 +211,210 @@ function createMainWindow(url: string) {
   return window;
 }
 
-function configureUpdater() {
-  if (!app.isPackaged) return;
+type GitHubRelease = {
+  tag_name: string;
+  html_url: string;
+  assets: Array<{
+    name: string;
+    browser_download_url: string;
+    size: number;
+  }>;
+};
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+function versionParts(value: string) {
+  return value
+    .replace(/^v/i, "")
+    .split(".")
+    .map((part) => Number.parseInt(part.replace(/[^0-9].*$/, ""), 10) || 0);
+}
 
-  autoUpdater.on("update-downloaded", async (info) => {
+function isNewerVersion(candidate: string, current: string) {
+  const a = versionParts(candidate);
+  const b = versionParts(current);
+  const length = Math.max(a.length, b.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const left = a[index] ?? 0;
+    const right = b[index] ?? 0;
+    if (left > right) return true;
+    if (left < right) return false;
+  }
+
+  return false;
+}
+
+async function fetchLatestRelease(): Promise<GitHubRelease> {
+  const response = await fetch(
+    "https://api.github.com/repos/TideAndType/LinkTide/releases/latest",
+    {
+      headers: {
+        accept: "application/vnd.github+json",
+        "user-agent": `LinkTide/${app.getVersion()}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`GitHub update check failed with status ${response.status}.`);
+  }
+
+  return (await response.json()) as GitHubRelease;
+}
+
+async function downloadReleaseDmg(release: GitHubRelease) {
+  const asset =
+    release.assets.find((item) =>
+      /LinkTide-.*-mac-universal\.dmg$/i.test(item.name)
+    ) ??
+    release.assets.find((item) => item.name.toLowerCase().endsWith(".dmg"));
+
+  if (!asset) {
+    throw new Error("The latest LinkTide release does not contain a DMG.");
+  }
+
+  const response = await fetch(asset.browser_download_url, {
+    headers: {
+      accept: "application/octet-stream",
+      "user-agent": `LinkTide/${app.getVersion()}`
+    }
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Could not download the update (${response.status}).`);
+  }
+
+  const target = join(app.getPath("downloads"), asset.name);
+  const destination = createWriteStream(target);
+  const readable = Readable.fromWeb(
+    response.body as import("node:stream/web").ReadableStream
+  );
+
+  await new Promise<void>((resolvePromise, reject) => {
+    readable.pipe(destination);
+    destination.on("finish", () => resolvePromise());
+    destination.on("error", reject);
+    readable.on("error", reject);
+  });
+
+  return target;
+}
+
+async function checkForPersonalUpdate(options?: { quiet?: boolean }) {
+  if (!app.isPackaged) {
+    if (!options?.quiet) {
+      await dialog.showMessageBox({
+        message: "Update checks are available in packaged LinkTide builds."
+      });
+    }
+    return;
+  }
+
+  try {
+    const release = await fetchLatestRelease();
+    const current = app.getVersion();
+
+    if (!isNewerVersion(release.tag_name, current)) {
+      if (!options?.quiet) {
+        await dialog.showMessageBox({
+          type: "info",
+          title: "LinkTide is up to date",
+          message: `You’re running LinkTide ${current}.`,
+          detail: "No newer GitHub release is available."
+        });
+      }
+      return;
+    }
+
     const result = await dialog.showMessageBox({
       type: "info",
-      title: "LinkTide Update Ready",
-      message: `LinkTide ${info.version} is ready to install.`,
-      detail: "Restart LinkTide now to finish updating.",
-      buttons: ["Restart & Update", "Later"],
+      title: "LinkTide Update Available",
+      message: `LinkTide ${release.tag_name.replace(/^v/i, "")} is available.`,
+      detail:
+        "LinkTide can download and open the new DMG. Drag the new LinkTide app over the old one in Applications to update.",
+      buttons: ["Download Update", "Later", "View Release"],
       defaultId: 0,
       cancelId: 1
     });
 
-    if (result.response === 0) {
-      autoUpdater.quitAndInstall();
+    if (result.response === 2) {
+      await shell.openExternal(release.html_url);
+      return;
     }
-  });
 
-  autoUpdater.on("error", (error) => {
-    console.error("LinkTide updater:", error.message);
-  });
+    if (result.response !== 0) return;
+
+    const progress = new BrowserWindow({
+      width: 460,
+      height: 190,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      parent: mainWindow ?? undefined,
+      modal: Boolean(mainWindow),
+      show: false,
+      backgroundColor: "#07110f",
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    const progressHtml = encodeURIComponent(`<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{height:100%;margin:0;background:#07110f;color:#edf7f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{display:grid;place-items:center}.wrap{text-align:center;padding:28px}.mark{font-weight:900;letter-spacing:.18em;font-size:11px;color:#66d6b6}
+h2{margin:10px 0 8px;font-size:24px}p{margin:0;color:#93a8a1;line-height:1.5}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#62e2bc;margin-right:7px;animation:p 1s ease-in-out infinite}@keyframes p{50%{opacity:.3}}
+</style></head><body><div class="wrap"><div class="mark">LINKTIDE</div><h2>Downloading update</h2><p><span class="dot"></span>Saving the new DMG to Downloads…</p></div></body></html>`);
+
+    await progress.loadURL(`data:text/html;charset=utf-8,${progressHtml}`);
+    progress.once("ready-to-show", () => progress.show());
+
+    try {
+      const dmgPath = await downloadReleaseDmg(release);
+      progress.close();
+      const openError = await shell.openPath(dmgPath);
+
+      if (openError) {
+        throw new Error(openError);
+      }
+
+      await dialog.showMessageBox({
+        type: "info",
+        title: "Update downloaded",
+        message: "The new LinkTide DMG is open.",
+        detail:
+          "Drag LinkTide into Applications and choose Replace. Then reopen LinkTide."
+      });
+    } catch (error) {
+      progress.close();
+      throw error;
+    }
+  } catch (error) {
+    if (!options?.quiet) {
+      await dialog.showMessageBox({
+        type: "error",
+        title: "Update check failed",
+        message: "LinkTide could not check for updates.",
+        detail: error instanceof Error ? error.message : "Unknown update error."
+      });
+    } else {
+      console.error(
+        "LinkTide update check:",
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+}
+
+function configureUpdater() {
+  if (!app.isPackaged) return;
 
   setTimeout(() => {
-    void autoUpdater.checkForUpdatesAndNotify().catch(() => undefined);
-  }, 4000);
+    void checkForPersonalUpdate({ quiet: true });
+  }, 5000);
 
   setInterval(() => {
-    void autoUpdater.checkForUpdatesAndNotify().catch(() => undefined);
+    void checkForPersonalUpdate({ quiet: true });
   }, 4 * 60 * 60 * 1000);
 }
 
@@ -261,7 +433,7 @@ function buildMenu() {
               });
               return;
             }
-            void autoUpdater.checkForUpdatesAndNotify();
+            void checkForPersonalUpdate();
           }
         },
         { type: "separator" },

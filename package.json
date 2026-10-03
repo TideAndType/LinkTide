@@ -15,7 +15,6 @@
     "desktop:dmg": "pnpm build:desktop && electron-builder --mac --universal --publish never"
   },
   "dependencies": {
-    "electron-updater": "latest",
     "playwright": "latest"
   },
   "devDependencies": {
