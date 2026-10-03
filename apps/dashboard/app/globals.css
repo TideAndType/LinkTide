@@ -142,7 +142,8 @@ label.wide { grid-column: 1 / -1; }
 label small { color: #6f8780; font-weight: 500; }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid rgba(151, 211, 194, .15);
   border-radius: 12px;
@@ -155,7 +156,8 @@ textarea {
 textarea { resize: vertical; }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   border-color: rgba(98, 226, 188, .65);
   box-shadow: 0 0 0 3px rgba(98, 226, 188, .08);
 }
@@ -499,4 +501,36 @@ code {
 
 .settingsMessage {
   margin: 12px 0 0;
+}
+
+.modelHelper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modelHelper small {
+  color: #6f8780;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.modelRefresh {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #72dfbf;
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.modelRefresh:hover {
+  color: #9aecd5;
+}
+
+select {
+  appearance: auto;
 }
