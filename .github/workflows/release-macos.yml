@@ -38,6 +38,20 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
 
+      - name: Validate Apple signing configuration
+        run: |
+          test -n "$CSC_LINK" || (echo "Missing MAC_CSC_LINK secret" && exit 1)
+          test -n "$CSC_KEY_PASSWORD" || (echo "Missing MAC_CSC_KEY_PASSWORD secret" && exit 1)
+          test -n "$APPLE_ID" || (echo "Missing APPLE_ID secret" && exit 1)
+          test -n "$APPLE_APP_SPECIFIC_PASSWORD" || (echo "Missing APPLE_APP_SPECIFIC_PASSWORD secret" && exit 1)
+          test -n "$APPLE_TEAM_ID" || (echo "Missing APPLE_TEAM_ID secret" && exit 1)
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
