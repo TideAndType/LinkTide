@@ -1,0 +1,20 @@
+{
+  "name": "@linktide/control-plane",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@linktide/classifier": "workspace:*",
+    "@linktide/discovery": "workspace:*",
+    "@linktide/lm-studio": "workspace:*",
+    "@linktide/search": "workspace:*",
+    "@linktide/vault": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}
