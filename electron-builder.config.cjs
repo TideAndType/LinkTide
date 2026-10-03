@@ -42,7 +42,8 @@ module.exports = {
     {
       provider: "github",
       owner: "TideAndType",
-      repo: "LinkTide"
+      repo: "LinkTide",
+      releaseType: "release"
     }
   ]
 };

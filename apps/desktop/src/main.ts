@@ -19,6 +19,7 @@ let workerClose: (() => Promise<void>) | null = null;
 let dashboardUrl = "";
 let quitting = false;
 
+const dashboardPort = 4316;
 const workerPort = 4317;
 
 function mimeType(pathname: string) {
@@ -75,9 +76,7 @@ async function startDashboardServer(root: string) {
 
       res.writeHead(200, {
         "content-type": mimeType(target),
-        "cache-control": app.isPackaged
-          ? "public, max-age=31536000, immutable"
-          : "no-store"
+        "cache-control": "no-store"
       });
       createReadStream(target).pipe(res);
     } catch {
@@ -88,7 +87,7 @@ async function startDashboardServer(root: string) {
 
   await new Promise<void>((resolvePromise, reject) => {
     staticServer?.once("error", reject);
-    staticServer?.listen(0, "127.0.0.1", () => resolvePromise());
+    staticServer?.listen(dashboardPort, "127.0.0.1", () => resolvePromise());
   });
 
   const address = staticServer.address();
@@ -96,7 +95,7 @@ async function startDashboardServer(root: string) {
     throw new Error("Could not start the LinkTide dashboard.");
   }
 
-  dashboardUrl = `http://127.0.0.1:${address.port}`;
+  dashboardUrl = `http://127.0.0.1:${dashboardPort}`;
   return dashboardUrl;
 }
 
@@ -296,6 +295,20 @@ function buildMenu() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 }
 
 async function startLinkTide() {
