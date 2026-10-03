@@ -5,6 +5,7 @@
     "dev": "pnpm --filter @linktide/dashboard dev",
     "worker": "pnpm --filter @linktide/worker serve",
     "worker:doctor": "pnpm --filter @linktide/worker doctor",
+    "worker:key": "pnpm --filter @linktide/worker generate-vault-key",
     "typecheck": "pnpm -r typecheck",
     "install:browsers": "pnpm --filter @linktide/browser exec playwright install chromium"
   },

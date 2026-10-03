@@ -87,6 +87,10 @@ pnpm install
 pnpm install:browsers
 cp .env.example .env
 
+# Generate a local credential-encryption key and paste it into
+# LINKTIDE_VAULT_KEY in .env
+pnpm worker:key
+
 # terminal 1
 pnpm worker
 
@@ -101,7 +105,12 @@ For each qualified opportunity:
 - **Inspect** opens the candidate, looks for a likely Add Business / Submit Listing path, reads the form, and maps it to the saved business profile.
 - **Fill & Submit** fills safe mapped fields and submits only when mapping confidence is at least 90%, all required fields are mapped, and no human checkpoint is detected.
 - CAPTCHA, login/password, verification codes, required legal agreements, payment flows, or low-confidence mappings stop submission and leave the browser tab open for manual action.
-- Payment/card fields, passwords, consent checkboxes, and verification fields are never automatically filled.
+- Payment/card fields, consent checkboxes, CAPTCHA, and verification-code fields are never automatically filled.
+- If a directory requires an account, LinkTide can generate a unique password, encrypt it locally with AES-256-GCM, and reuse it for later logins. The encrypted vault is ignored by Git.
+- If email verification is required, LinkTide records the account as unverified and leaves the browser open for human completion.
+- High-confidence form mappings are saved as local directory recipes. Future runs can reuse those mappings before calling LM Studio.
+
+Set `LINKTIDE_AUTO_CREATE_ACCOUNTS=false` to keep account creation off by default. The dashboard may explicitly request account creation for a single submission job.
 
 Set `LINKTIDE_AUTO_SUBMIT=false` to keep global auto-submit off. The dashboard's **Fill & Submit** button explicitly requests auto-submit for that one job, but the same safety gates still apply.
 

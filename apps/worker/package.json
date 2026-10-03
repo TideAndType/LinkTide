@@ -6,15 +6,20 @@
     "dev": "tsx src/index.ts",
     "serve": "tsx src/index.ts serve",
     "doctor": "tsx src/index.ts doctor",
+    "generate-vault-key": "tsx src/index.ts generate-vault-key",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@linktide/accounts": "workspace:*",
     "@linktide/browser": "workspace:*",
     "@linktide/discovery": "workspace:*",
     "@linktide/form-mapper": "workspace:*",
     "@linktide/lm-studio": "workspace:*",
+    "@linktide/recipes": "workspace:*",
     "@linktide/submissions": "workspace:*",
-    "dotenv": "latest"
+    "@linktide/vault": "workspace:*",
+    "dotenv": "latest",
+    "playwright": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
