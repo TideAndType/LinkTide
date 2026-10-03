@@ -26,6 +26,22 @@ type BusinessProfile = {
   logoPath: string;
 };
 
+type AppSettings = {
+  lmStudioBaseUrl: string;
+  lmStudioModel: string;
+  lmStudioApiKey: string;
+  braveSearchApiKey: string;
+};
+
+type PublicSettings = {
+  lmStudioBaseUrl: string;
+  lmStudioModel: string;
+  hasLmStudioApiKey: boolean;
+  hasBraveSearchApiKey: boolean;
+  searchMaxQueries: number;
+  searchResultsPerQuery: number;
+};
+
 type DiscoveryPlan = {
   aiUsed: boolean;
   additionalNiches: string[];
@@ -88,10 +104,6 @@ type AutomationResult = {
     filled: string[];
     skipped: Array<{ key: string; reason: string }>;
   };
-  decision?: {
-    canAutoSubmit: boolean;
-    reasons: string[];
-  };
   recipeUsed?: boolean;
   recipeSaved?: boolean;
   recipeCoverage?: number;
@@ -105,7 +117,6 @@ type AutomationResult = {
     title?: string;
     submissionPageUrl?: string;
     checkpoints?: string[];
-    forms?: Array<{ formIndex: number; fields: unknown[] }>;
   };
 };
 
@@ -136,6 +147,13 @@ const emptyProfile: BusinessProfile = {
   logoPath: ""
 };
 
+const emptySettings: AppSettings = {
+  lmStudioBaseUrl: "",
+  lmStudioModel: "",
+  lmStudioApiKey: "",
+  braveSearchApiKey: ""
+};
+
 function splitCsv(value: string) {
   return value
     .split(",")
@@ -151,12 +169,16 @@ function percent(value?: number) {
 export function LinkTideDashboard() {
   const [profile, setProfile] = useState<BusinessProfile>(emptyProfile);
   const [saved, setSaved] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(emptySettings);
+  const [publicSettings, setPublicSettings] = useState<PublicSettings | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("Loading settings...");
   const [lmStatus, setLmStatus] = useState<
     "unknown" | "testing" | "connected" | "missing" | "error"
   >("unknown");
   const [lmMessage, setLmMessage] = useState("Not tested yet");
   const [workerState, setWorkerState] = useState<WorkerState>("checking");
-  const [workerMessage, setWorkerMessage] = useState("Checking local worker...");
+  const [workerMessage, setWorkerMessage] = useState("Starting LinkTide service...");
   const [discovering, setDiscovering] = useState(false);
   const [plan, setPlan] = useState<DiscoveryPlan | null>(null);
   const [searching, setSearching] = useState(false);
@@ -189,7 +211,7 @@ export function LinkTideDashboard() {
       }
     }
 
-    void testWorker();
+    void Promise.all([testWorker(), loadSettings()]);
   }, []);
 
   const isReady = useMemo(
@@ -202,12 +224,25 @@ export function LinkTideDashboard() {
     [profile]
   );
 
+  const settingsReady = Boolean(
+    publicSettings?.lmStudioBaseUrl &&
+      publicSettings?.lmStudioModel &&
+      publicSettings?.hasBraveSearchApiKey
+  );
+
   function update<K extends keyof BusinessProfile>(
     field: K,
     value: BusinessProfile[K]
   ) {
     setProfile((current) => ({ ...current, [field]: value }));
     setSaved(false);
+  }
+
+  function updateSetting<K extends keyof AppSettings>(
+    field: K,
+    value: AppSettings[K]
+  ) {
+    setSettings((current) => ({ ...current, [field]: value }));
   }
 
   function saveProfile(event?: FormEvent) {
@@ -244,40 +279,102 @@ export function LinkTideDashboard() {
     };
   }
 
+  async function loadSettings() {
+    try {
+      const response = await fetch(`${workerUrl}/settings`);
+      const result = (await response.json()) as PublicSettings & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Could not load settings.");
+      }
+
+      setPublicSettings(result);
+      setSettings((current) => ({
+        ...current,
+        lmStudioBaseUrl: result.lmStudioBaseUrl ?? "",
+        lmStudioModel: result.lmStudioModel ?? ""
+      }));
+      setSettingsMessage(
+        result.hasBraveSearchApiKey
+          ? "Settings saved on this Mac."
+          : "Add your LM Studio and Brave Search settings."
+      );
+    } catch (caught) {
+      setSettingsMessage(
+        caught instanceof Error ? caught.message : "Could not load settings."
+      );
+    }
+  }
+
+  async function saveAppSettings(event?: FormEvent) {
+    event?.preventDefault();
+    setSavingSettings(true);
+    setError("");
+
+    try {
+      const response = await fetch(`${workerUrl}/settings`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(settings)
+      });
+      const result = (await response.json()) as PublicSettings & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Could not save settings.");
+      }
+
+      setPublicSettings(result);
+      setSettings((current) => ({
+        ...current,
+        lmStudioApiKey: "",
+        braveSearchApiKey: ""
+      }));
+      setSettingsMessage("Saved locally. Secret fields were cleared from the screen.");
+      await testWorker();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save settings.");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
   async function testWorker() {
     setWorkerState("checking");
-    setWorkerMessage("Checking local worker...");
 
     try {
       const response = await fetch(`${workerUrl}/health`);
       const result = await response.json();
 
       if (!response.ok || !result.ok) {
-        throw new Error(result.error ?? "Worker did not respond.");
+        throw new Error(result.error ?? "LinkTide service did not respond.");
       }
 
       setWorkerState("online");
       setWorkerMessage(
         [
-          "Browser worker online",
-          result.vaultConfigured ? `${result.credentials ?? 0} encrypted account(s)` : "vault key missing",
+          "Local service online",
+          result.vaultConfigured
+            ? `${result.credentials ?? 0} encrypted account(s)`
+            : "vault initializing",
           `${result.recipes ?? 0} learned recipe(s)`,
-          result.lmStudioConfigured ? "LM Studio ready" : "LM Studio not configured"
+          result.lmStudioConfigured ? "LM Studio ready" : "LM Studio needs setup"
         ].join(" · ")
       );
     } catch {
       setWorkerState("offline");
-      setWorkerMessage("Worker offline. Run pnpm worker on this computer.");
+      setWorkerMessage("Local LinkTide service is unavailable. Restart the app.");
     }
   }
 
   async function testLmStudio() {
     setLmStatus("testing");
-    setLmMessage("Testing your configured LM Studio endpoint...");
+    setLmMessage("Testing your LM Studio connection...");
     setError("");
 
     try {
-      const response = await fetch("/api/lm-studio/test", { method: "POST" });
+      const response = await fetch(`${workerUrl}/lm-studio/test`, {
+        method: "POST"
+      });
       const result = await response.json();
 
       if (!response.ok) {
@@ -309,7 +406,7 @@ export function LinkTideDashboard() {
     setError("");
 
     try {
-      const response = await fetch("/api/discovery/plan", {
+      const response = await fetch(`${workerUrl}/discovery/plan`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -324,7 +421,6 @@ export function LinkTideDashboard() {
       });
 
       const result = await response.json();
-
       if (!response.ok) {
         throw new Error(result.error ?? "Could not create discovery plan.");
       }
@@ -352,7 +448,7 @@ export function LinkTideDashboard() {
     setError("");
 
     try {
-      const response = await fetch("/api/discovery/search", {
+      const response = await fetch(`${workerUrl}/discovery/search`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -369,7 +465,6 @@ export function LinkTideDashboard() {
       });
 
       const result = await response.json();
-
       if (!response.ok) {
         throw new Error(result.error ?? "Live discovery failed.");
       }
@@ -411,7 +506,6 @@ export function LinkTideDashboard() {
       );
 
       const result = await response.json();
-
       if (!response.ok) {
         throw new Error(result.error ?? "Automation job failed.");
       }
@@ -420,15 +514,8 @@ export function LinkTideDashboard() {
         ...current,
         [item.id]: result
       }));
-
-      setWorkerState("online");
-      setWorkerMessage("Browser worker online");
     } catch (caught) {
-      setWorkerState("offline");
-      const message =
-        caught instanceof Error ? caught.message : "Automation job failed.";
-      setWorkerMessage("Worker unavailable or job failed.");
-      setError(message);
+      setError(caught instanceof Error ? caught.message : "Automation job failed.");
     } finally {
       setActiveAutomationId(null);
     }
@@ -451,7 +538,9 @@ export function LinkTideDashboard() {
       for (let index = 0; index < queued.length; index += 1) {
         const item = queued[index];
         setActiveAutomationId(item.id);
-        setBatchMessage(`Processing ${index + 1} / ${queued.length}: ${item.domain}`);
+        setBatchMessage(
+          `Processing ${index + 1} / ${queued.length}: ${item.domain}`
+        );
 
         const response = await fetch(`${workerUrl}/submit`, {
           method: "POST",
@@ -465,7 +554,6 @@ export function LinkTideDashboard() {
         });
 
         const result = await response.json();
-
         if (!response.ok) {
           throw new Error(result.error ?? `Automation failed for ${item.domain}.`);
         }
@@ -485,9 +573,9 @@ export function LinkTideDashboard() {
 
       setBatchMessage(`Finished all ${queued.length} queued opportunities.`);
     } catch (caught) {
-      const message =
-        caught instanceof Error ? caught.message : "Queue automation failed.";
-      setError(message);
+      setError(
+        caught instanceof Error ? caught.message : "Queue automation failed."
+      );
       setBatchMessage("Queue stopped because of an error.");
     } finally {
       setActiveAutomationId(null);
@@ -510,13 +598,10 @@ export function LinkTideDashboard() {
           <h1>Backlink Command Center</h1>
           <p className="muted lead">
             Discover relevant directories, qualify them with your local AI, and
-            hand safe submissions to a real browser running on your computer.
+            hand safe submissions to a real browser on your Mac.
           </p>
         </div>
         <div className="topActions">
-          <button className="secondary" onClick={testWorker} type="button">
-            Check Worker
-          </button>
           <button className="secondary" onClick={testLmStudio} type="button">
             {lmStatus === "testing" ? "Testing..." : "Test LM Studio"}
           </button>
@@ -532,8 +617,14 @@ export function LinkTideDashboard() {
           <strong>{saved ? "Saved" : "Draft"}</strong>
         </article>
         <article className="card">
-          <span>Browser worker</span>
-          <strong>{workerState === "online" ? "Online" : workerState === "checking" ? "…" : "Offline"}</strong>
+          <span>Local service</span>
+          <strong>
+            {workerState === "online"
+              ? "Online"
+              : workerState === "checking"
+                ? "…"
+                : "Offline"}
+          </strong>
         </article>
         <article className="card">
           <span>Search queries</span>
@@ -544,6 +635,16 @@ export function LinkTideDashboard() {
           <strong>{searchRun?.opportunities.length ?? 0}</strong>
         </article>
       </section>
+
+      {!settingsReady ? (
+        <div className="setupBanner">
+          <strong>Finish LinkTide setup</strong>
+          <span>
+            Add your LM Studio tunnel/model and Brave Search API key in Settings.
+            No Terminal is required.
+          </span>
+        </div>
+      ) : null}
 
       <section className="workspace">
         <form className="panel profilePanel" onSubmit={saveProfile}>
@@ -562,142 +663,165 @@ export function LinkTideDashboard() {
               Business name
               <input value={profile.name} onChange={(e) => update("name", e.target.value)} placeholder="Tide & Type Co." />
             </label>
-
             <label>
               Website
               <input value={profile.website} onChange={(e) => update("website", e.target.value)} placeholder="https://example.com" inputMode="url" />
             </label>
-
             <label>
               Contact name
               <input value={profile.contactName} onChange={(e) => update("contactName", e.target.value)} placeholder="Primary contact" />
             </label>
-
             <label>
               Primary category
               <input value={profile.primaryCategory} onChange={(e) => update("primaryCategory", e.target.value)} placeholder="Digital Marketing Agency" />
             </label>
-
             <label>
               Phone
               <input value={profile.phone} onChange={(e) => update("phone", e.target.value)} placeholder="Business phone" />
             </label>
-
             <label>
               Email
               <input value={profile.email} onChange={(e) => update("email", e.target.value)} placeholder="Business email" inputMode="email" />
             </label>
-
             <label className="wide">
               Address
               <input value={profile.address1} onChange={(e) => update("address1", e.target.value)} placeholder="Street address" />
             </label>
-
             <label>
               Address line 2
               <input value={profile.address2} onChange={(e) => update("address2", e.target.value)} placeholder="Suite / unit" />
             </label>
-
             <label>
               City
               <input value={profile.city} onChange={(e) => update("city", e.target.value)} />
             </label>
-
             <label>
               State / Province
               <input value={profile.state} onChange={(e) => update("state", e.target.value)} />
             </label>
-
             <label>
               Postal code
               <input value={profile.postalCode} onChange={(e) => update("postalCode", e.target.value)} />
             </label>
-
             <label>
               Country
               <input value={profile.country} onChange={(e) => update("country", e.target.value)} />
             </label>
-
-            <label>
+            <label className="wide">
               Niches
               <input value={profile.niches} onChange={(e) => update("niches", e.target.value)} placeholder="SEO, web design, digital marketing" />
               <small>Comma separated</small>
             </label>
-
             <label className="wide">
               Services
               <input value={profile.services} onChange={(e) => update("services", e.target.value)} placeholder="Local SEO, WordPress, PPC, CRM" />
               <small>Comma separated</small>
             </label>
-
             <label className="wide">
               Target / service locations
               <input value={profile.locations} onChange={(e) => update("locations", e.target.value)} placeholder="Florida, Volusia County, Ormond Beach" />
               <small>Comma separated</small>
             </label>
-
             <label className="wide">
               Short description
               <textarea rows={3} value={profile.descriptionShort} onChange={(e) => update("descriptionShort", e.target.value)} placeholder="Short reusable directory description" />
             </label>
-
             <label className="wide">
               Long description
               <textarea rows={5} value={profile.descriptionLong} onChange={(e) => update("descriptionLong", e.target.value)} placeholder="Longer company description for richer listing forms" />
             </label>
-
             <label>
               Facebook URL
               <input value={profile.facebook} onChange={(e) => update("facebook", e.target.value)} />
             </label>
-
             <label>
               LinkedIn URL
               <input value={profile.linkedin} onChange={(e) => update("linkedin", e.target.value)} />
             </label>
-
             <label>
               Instagram URL
               <input value={profile.instagram} onChange={(e) => update("instagram", e.target.value)} />
             </label>
-
             <label>
-              Local logo file path
+              Logo file path
               <input value={profile.logoPath} onChange={(e) => update("logoPath", e.target.value)} placeholder="/Users/you/logo.png" />
-              <small>Used by the local Playwright worker for file uploads.</small>
             </label>
           </div>
 
           <div className="formActions">
             <button className="secondary" type="submit">Save Profile</button>
             <span className="muted tiny">
-              Business data stays in this browser for V1. Secrets stay in your local .env.
+              Business data and credentials stay on this Mac.
             </span>
           </div>
         </form>
 
         <aside className="sideStack">
+          <form className="panel compact" onSubmit={saveAppSettings}>
+            <p className="eyebrow">SETTINGS</p>
+            <h2>Connections</h2>
+
+            <div className="settingsFields">
+              <label>
+                LM Studio tunnel
+                <input
+                  value={settings.lmStudioBaseUrl}
+                  onChange={(e) => updateSetting("lmStudioBaseUrl", e.target.value)}
+                  placeholder="https://your-tunnel.example.com/v1"
+                />
+              </label>
+              <label>
+                LM Studio model
+                <input
+                  value={settings.lmStudioModel}
+                  onChange={(e) => updateSetting("lmStudioModel", e.target.value)}
+                  placeholder="your-loaded-model"
+                />
+              </label>
+              <label>
+                LM Studio API key
+                <input
+                  type="password"
+                  value={settings.lmStudioApiKey}
+                  onChange={(e) => updateSetting("lmStudioApiKey", e.target.value)}
+                  placeholder={publicSettings?.hasLmStudioApiKey ? "Saved" : "Optional"}
+                />
+              </label>
+              <label>
+                Brave Search API key
+                <input
+                  type="password"
+                  value={settings.braveSearchApiKey}
+                  onChange={(e) => updateSetting("braveSearchApiKey", e.target.value)}
+                  placeholder={publicSettings?.hasBraveSearchApiKey ? "Saved" : "Required for live search"}
+                />
+              </label>
+            </div>
+
+            <button className="primary full" type="submit" disabled={savingSettings}>
+              {savingSettings ? "Saving..." : "Save Settings"}
+            </button>
+            <p className="tiny muted settingsMessage">{settingsMessage}</p>
+          </form>
+
           <section className="panel compact">
-            <p className="eyebrow">LOCAL BROWSER</p>
-            <h2>Playwright worker</h2>
+            <p className="eyebrow">LOCAL SERVICE</p>
+            <h2>Automation engine</h2>
             <p className="muted">
-              LinkTide opens and fills third-party directory forms in a persistent
-              Chromium profile on your machine.
+              Chromium sessions, encrypted directory accounts, learned recipes,
+              and submission automation all run locally.
             </p>
             <div className={workerState === "online" ? "status good" : workerState === "offline" ? "status bad" : "status"}>
               {workerMessage}
             </div>
-            <button className="secondary full" onClick={testWorker} type="button">
-              Test Worker
-            </button>
           </section>
 
           <section className="panel compact">
             <p className="eyebrow">LOCAL AI</p>
             <h2>LM Studio</h2>
             <p className="muted">
-              LM Studio expands discovery searches and maps unfamiliar form fields
-              without sending your business profile to a hosted LLM.
+              LinkTide uses your LM Studio endpoint for niche expansion and
+              unfamiliar form mapping.
             </p>
             <div className={statusClass}>{lmMessage}</div>
             <button className="secondary full" onClick={testLmStudio} type="button">
@@ -709,8 +833,8 @@ export function LinkTideDashboard() {
             <p className="eyebrow">GUARDRAILS</p>
             <h2>Human handoff</h2>
             <p className="muted">
-              CAPTCHA, passwords, verification, required agreements, payment, or
-              low-confidence mappings stop auto-submit and leave the browser tab open.
+              CAPTCHA, verification, required agreements, payment, or
+              low-confidence mappings pause automation and leave the browser open.
             </p>
           </section>
         </aside>
@@ -749,7 +873,6 @@ export function LinkTideDashboard() {
                   )}
                 </div>
               </div>
-
               <div>
                 <h3>Directory types to hunt</h3>
                 <div className="tags">
@@ -762,7 +885,7 @@ export function LinkTideDashboard() {
               <div>
                 <h3>{plan.queries.length} search queries ready</h3>
                 <span className="muted tiny">
-                  LinkTide runs a limited batch, dedupes domains, then asks LM Studio to qualify candidates.
+                  LinkTide runs a limited batch, dedupes domains, then qualifies candidates.
                 </span>
               </div>
               <button className="primary" onClick={searchAndQualify} type="button" disabled={searching}>
@@ -840,7 +963,6 @@ export function LinkTideDashboard() {
                         <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
                         <span className={`actionPill ${item.action}`}>{item.action}</span>
                       </div>
-
                       <p className="domain">{item.domain}</p>
                       <p className="muted opportunityDescription">
                         {item.description || "No search snippet available."}
@@ -880,24 +1002,22 @@ export function LinkTideDashboard() {
                           </div>
 
                           <div className="automationFacts">
-                            <span>
-                              Form mapping: <b>{percent(automation.mappingQuality?.averageConfidence)}</b>
-                            </span>
-                            <span>
-                              Fields mapped: <b>{automation.mappingQuality?.mappedCount ?? 0}</b>
-                            </span>
-                            <span>
-                              Required unmapped: <b>{automation.mappingQuality?.requiredUnmapped?.length ?? 0}</b>
-                            </span>
-                            <span>
-                              AI mapper: <b>{automation.aiUsed ? "yes" : "fallback"}</b>
-                            </span>
-                            <span>
-                              Recipe: <b>{automation.recipeUsed ? "reused" : automation.recipeSaved ? "learned" : "new"}</b>
-                            </span>
+                            <span>Form mapping: <b>{percent(automation.mappingQuality?.averageConfidence)}</b></span>
+                            <span>Fields mapped: <b>{automation.mappingQuality?.mappedCount ?? 0}</b></span>
+                            <span>Required unmapped: <b>{automation.mappingQuality?.requiredUnmapped?.length ?? 0}</b></span>
+                            <span>AI mapper: <b>{automation.aiUsed ? "yes" : "fallback"}</b></span>
+                            <span>Recipe: <b>{automation.recipeUsed ? "reused" : automation.recipeSaved ? "learned" : "new"}</b></span>
                             {automation.account ? (
                               <span>
-                                Account: <b>{automation.account.verificationPending ? "verify email" : automation.account.accountCreated ? "created" : automation.account.existingCredential ? "stored login" : automation.account.status ?? "n/a"}</b>
+                                Account: <b>
+                                  {automation.account.verificationPending
+                                    ? "verify email"
+                                    : automation.account.accountCreated
+                                      ? "created"
+                                      : automation.account.existingCredential
+                                        ? "stored login"
+                                        : automation.account.status ?? "n/a"}
+                                </b>
                               </span>
                             ) : null}
                           </div>
@@ -915,7 +1035,9 @@ export function LinkTideDashboard() {
                           ) : null}
 
                           {automation.reasons?.length ? (
-                            <p className="automationWarning">{automation.reasons.join(" ")}</p>
+                            <p className="automationWarning">
+                              {automation.reasons.join(" ")}
+                            </p>
                           ) : null}
 
                           {automation.fillResult ? (

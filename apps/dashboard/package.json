@@ -4,14 +4,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@linktide/classifier": "workspace:*",
-    "@linktide/discovery": "workspace:*",
-    "@linktide/lm-studio": "workspace:*",
-    "@linktide/search": "workspace:*",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest"
