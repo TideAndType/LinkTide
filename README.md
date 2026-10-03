@@ -22,9 +22,11 @@ All application settings, encrypted directory credentials, learned recipes, and 
 
 ## Updates
 
-Packaged LinkTide builds use `electron-updater` with GitHub Releases. The app checks shortly after startup and every four hours while it is running. When an update finishes downloading, LinkTide offers **Restart & Update**.
+LinkTide is configured for a personal-use update flow that does not require an Apple Developer account.
 
-macOS auto-update requires a signed application, so production releases are built with a Developer ID certificate and notarized by Apple. The release workflow intentionally refuses to publish when the signing credentials are missing.
+The app checks GitHub Releases shortly after startup and every four hours while it is running. When a newer version exists, LinkTide offers **Download Update**. It downloads the new DMG into your Downloads folder and opens it automatically. Drag the new LinkTide app over the existing copy in Applications and choose **Replace**.
+
+Because macOS requires a properly signed app for true in-place automatic updates, this personal-use build intentionally uses an ad-hoc signature instead of Apple Developer ID signing. You may need to approve LinkTide in **System Settings → Privacy & Security** the first time macOS blocks an unsigned/unnotarized build.
 
 ## What LinkTide does
 
@@ -58,15 +60,7 @@ To run the dashboard/worker during development, use the project scripts. These c
 
 Releases are created from **GitHub Actions → Release macOS App → Run workflow**. Enter a semantic version such as `0.1.0`.
 
-Required repository secrets:
-
-- `MAC_CSC_LINK` — Developer ID Application certificate exported as a password-protected `.p12` and encoded/supplied in electron-builder-compatible form.
-- `MAC_CSC_KEY_PASSWORD` — password for the certificate.
-- `APPLE_ID` — Apple ID used for notarization.
-- `APPLE_APP_SPECIFIC_PASSWORD` — Apple app-specific password.
-- `APPLE_TEAM_ID` — Apple Developer team ID.
-
-The workflow builds a universal macOS application, signs it, notarizes it, publishes the DMG and updater ZIP, and publishes the update metadata to the public GitHub Release.
+No Apple Developer secrets are required for the personal-use build. GitHub Actions builds an ad-hoc signed universal DMG and publishes it to a public GitHub Release. Installed LinkTide copies use that release to detect and download newer DMGs.
 
 ## Repository layout
 
