@@ -101,7 +101,8 @@ async function startDashboardServer(root: string) {
 }
 
 function playwrightCliPath() {
-  return require.resolve("playwright/cli");
+  const packageJson = require.resolve("playwright/package.json");
+  return join(packageJson, "..", "cli.js");
 }
 
 async function ensureAutomationBrowser(splash?: BrowserWindow) {
