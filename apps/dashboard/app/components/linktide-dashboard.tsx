@@ -162,6 +162,8 @@ export function LinkTideDashboard() {
   const [searching, setSearching] = useState(false);
   const [searchRun, setSearchRun] = useState<SearchRun | null>(null);
   const [activeAutomationId, setActiveAutomationId] = useState<string | null>(null);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchMessage, setBatchMessage] = useState("");
   const [automationResults, setAutomationResults] = useState<
     Record<string, AutomationResult>
   >({});
@@ -429,6 +431,67 @@ export function LinkTideDashboard() {
       setError(message);
     } finally {
       setActiveAutomationId(null);
+    }
+  }
+
+  async function processQueue() {
+    const queued =
+      searchRun?.opportunities.filter((item) => item.action === "queue") ?? [];
+
+    if (!queued.length) {
+      setError("There are no queued opportunities to process.");
+      return;
+    }
+
+    setBatchRunning(true);
+    setBatchMessage(`Starting 0 / ${queued.length}`);
+    setError("");
+
+    try {
+      for (let index = 0; index < queued.length; index += 1) {
+        const item = queued[index];
+        setActiveAutomationId(item.id);
+        setBatchMessage(`Processing ${index + 1} / ${queued.length}: ${item.domain}`);
+
+        const response = await fetch(`${workerUrl}/submit`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            url: item.url,
+            business: workerBusiness(),
+            autoSubmit: true,
+            autoCreateAccount: true
+          })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error ?? `Automation failed for ${item.domain}.`);
+        }
+
+        setAutomationResults((current) => ({
+          ...current,
+          [item.id]: result
+        }));
+
+        if (!result.submitted || result.browserLeftOpen) {
+          setBatchMessage(
+            `Paused at ${item.domain}. Complete the human step in the open browser, then run the queue again.`
+          );
+          return;
+        }
+      }
+
+      setBatchMessage(`Finished all ${queued.length} queued opportunities.`);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "Queue automation failed.";
+      setError(message);
+      setBatchMessage("Queue stopped because of an error.");
+    } finally {
+      setActiveAutomationId(null);
+      setBatchRunning(false);
     }
   }
 
@@ -726,9 +789,19 @@ export function LinkTideDashboard() {
             <h2>Inspect, fill, and submit</h2>
           </div>
           {searchRun ? (
-            <span className={searchRun.aiUsed ? "status good" : "status"}>
-              {searchRun.aiUsed ? "LM Studio qualified" : "Fallback review"}
-            </span>
+            <div className="queueHeaderActions">
+              <span className={searchRun.aiUsed ? "status good" : "status"}>
+                {searchRun.aiUsed ? "LM Studio qualified" : "Fallback review"}
+              </span>
+              <button
+                className="primary smallButton"
+                type="button"
+                onClick={processQueue}
+                disabled={batchRunning || activeAutomationId !== null || searchRun.queued === 0}
+              >
+                {batchRunning ? "Running Queue..." : "Run Queue"}
+              </button>
+            </div>
           ) : null}
         </div>
 
@@ -739,6 +812,12 @@ export function LinkTideDashboard() {
           </div>
         ) : (
           <>
+            {batchMessage ? (
+              <div className={batchRunning ? "batchBanner active" : "batchBanner"}>
+                {batchMessage}
+              </div>
+            ) : null}
+
             <div className="runStats">
               <div><span>Searches</span><strong>{searchRun.searchesRun}</strong></div>
               <div><span>Raw results</span><strong>{searchRun.rawResults}</strong></div>
