@@ -72,23 +72,23 @@ export function buildRecipe(input: {
   const byKey = new Map(input.mappings.map((mapping) => [mapping.key, mapping]));
   const now = new Date().toISOString();
 
-  const fields = input.form.fields
-    .map((field) => {
-      const mapping = byKey.get(field.key);
-      if (!mapping || mapping.businessField === "skip") return undefined;
+  const fields: RecipeField[] = [];
 
-      return {
-        type: field.type,
-        name: field.name,
-        id: field.id,
-        label: field.label,
-        placeholder: field.placeholder,
-        businessField: mapping.businessField,
-        selectValue: mapping.selectValue,
-        confidence: mapping.confidence
-      } satisfies RecipeField;
-    })
-    .filter((field): field is RecipeField => Boolean(field));
+  for (const field of input.form.fields) {
+    const mapping = byKey.get(field.key);
+    if (!mapping || mapping.businessField === "skip") continue;
+
+    fields.push({
+      type: field.type,
+      name: field.name,
+      id: field.id,
+      label: field.label,
+      placeholder: field.placeholder,
+      businessField: mapping.businessField,
+      selectValue: mapping.selectValue,
+      confidence: mapping.confidence
+    });
+  }
 
   return {
     version: 1,
