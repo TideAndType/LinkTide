@@ -11,5 +11,11 @@
   },
   "devDependencies": {
     "typescript": "latest"
+  },
+  "packageManager": "pnpm@12.8.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
