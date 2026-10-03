@@ -8,6 +8,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@linktide/discovery": "workspace:*",
+    "@linktide/lm-studio": "workspace:*",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest"
