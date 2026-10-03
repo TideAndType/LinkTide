@@ -289,7 +289,12 @@ async function inspectJob(input: {
 type AccountResolution = {
   handled: boolean;
   authenticated: boolean;
-  status?: "verification_required" | "human_action_required" | "failed";
+  status?:
+    | "logged_in"
+    | "created"
+    | "verification_required"
+    | "human_action_required"
+    | "failed";
   reason?: string;
   checkpoints?: string[];
   existingCredential?: boolean;
