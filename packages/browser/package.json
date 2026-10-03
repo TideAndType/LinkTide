@@ -1,0 +1,12 @@
+{
+  "name": "@linktide/browser",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": { "playwright": "latest" },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}

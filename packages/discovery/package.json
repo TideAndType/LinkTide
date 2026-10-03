@@ -1,0 +1,8 @@
+{
+  "name": "@linktide/discovery",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "devDependencies": { "typescript": "latest" }
+}

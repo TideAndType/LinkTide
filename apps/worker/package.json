@@ -1,0 +1,20 @@
+{
+  "name": "@linktide/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@linktide/browser": "workspace:*",
+    "@linktide/discovery": "workspace:*",
+    "@linktide/lm-studio": "workspace:*",
+    "dotenv": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

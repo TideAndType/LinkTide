@@ -1,0 +1,13 @@
+{
+  "name": "linktide",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @linktide/dashboard dev",
+    "worker": "pnpm --filter @linktide/worker dev",
+    "typecheck": "pnpm -r typecheck",
+    "install:browsers": "pnpm --filter @linktide/browser exec playwright install chromium"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}
