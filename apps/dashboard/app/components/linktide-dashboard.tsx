@@ -92,6 +92,15 @@ type AutomationResult = {
     canAutoSubmit: boolean;
     reasons: string[];
   };
+  recipeUsed?: boolean;
+  recipeSaved?: boolean;
+  recipeCoverage?: number;
+  account?: {
+    status?: string;
+    accountCreated?: boolean;
+    existingCredential?: boolean;
+    verificationPending?: boolean;
+  };
   inspection?: {
     title?: string;
     submissionPageUrl?: string;
@@ -247,9 +256,12 @@ export function LinkTideDashboard() {
 
       setWorkerState("online");
       setWorkerMessage(
-        result.lmStudioConfigured
-          ? "Browser worker online · LM Studio available"
-          : "Browser worker online · LM Studio not configured"
+        [
+          "Browser worker online",
+          result.vaultConfigured ? `${result.credentials ?? 0} encrypted account(s)` : "vault key missing",
+          `${result.recipes ?? 0} learned recipe(s)`,
+          result.lmStudioConfigured ? "LM Studio ready" : "LM Studio not configured"
+        ].join(" · ")
       );
     } catch {
       setWorkerState("offline");
@@ -390,7 +402,8 @@ export function LinkTideDashboard() {
           body: JSON.stringify({
             url: item.url,
             business: workerBusiness(),
-            autoSubmit: mode === "submit"
+            autoSubmit: mode === "submit",
+            autoCreateAccount: mode === "submit"
           })
         }
       );
@@ -800,6 +813,14 @@ export function LinkTideDashboard() {
                             <span>
                               AI mapper: <b>{automation.aiUsed ? "yes" : "fallback"}</b>
                             </span>
+                            <span>
+                              Recipe: <b>{automation.recipeUsed ? "reused" : automation.recipeSaved ? "learned" : "new"}</b>
+                            </span>
+                            {automation.account ? (
+                              <span>
+                                Account: <b>{automation.account.verificationPending ? "verify email" : automation.account.accountCreated ? "created" : automation.account.existingCredential ? "stored login" : automation.account.status ?? "n/a"}</b>
+                              </span>
+                            ) : null}
                           </div>
 
                           {inspection?.submissionPageUrl ? (
