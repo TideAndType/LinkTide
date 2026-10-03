@@ -12,6 +12,14 @@ import {
   type OpportunityInspection
 } from "@linktide/browser";
 import type { BrowserContext, Page } from "playwright";
+import {
+  createDiscoveryPlan,
+  getPublicSettings,
+  loadSettings,
+  runDiscoverySearch,
+  testLmStudioConnection,
+  updateSettings
+} from "@linktide/control-plane";
 import { generateDirectoryQueries } from "@linktide/discovery";
 import {
   calculateMappingQuality,
@@ -630,7 +638,9 @@ function send(
   res.end(JSON.stringify(payload));
 }
 
-async function serve() {
+export async function startWorkerServer() {
+  await loadSettings(dataDir());
+
   const port = Number(process.env.LINKTIDE_WORKER_PORT ?? 4317);
   let busy = false;
 
@@ -641,6 +651,64 @@ async function serve() {
       send(res, 204, {}, origin);
       return;
     }
+
+    if (req.method === "GET" && req.url === "/settings") {
+      send(res, 200, await getPublicSettings(dataDir()), origin);
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/settings") {
+      try {
+        const body = await readJson(req);
+        const settings = await updateSettings(dataDir(), body);
+        send(res, 200, settings, origin);
+      } catch (error) {
+        send(
+          res,
+          400,
+          { error: error instanceof Error ? error.message : "Could not save settings." },
+          origin
+        );
+      }
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/lm-studio/test") {
+      const result = await testLmStudioConnection();
+      send(res, result.status, result.body, origin);
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/discovery/plan") {
+      try {
+        const result = await createDiscoveryPlan(await readJson(req));
+        send(res, result.status, result.body, origin);
+      } catch (error) {
+        send(
+          res,
+          500,
+          { error: error instanceof Error ? error.message : "Discovery planning failed." },
+          origin
+        );
+      }
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/discovery/search") {
+      try {
+        const result = await runDiscoverySearch(await readJson(req));
+        send(res, result.status, result.body, origin);
+      } catch (error) {
+        send(
+          res,
+          500,
+          { error: error instanceof Error ? error.message : "Live discovery failed." },
+          origin
+        );
+      }
+      return;
+    }
+
 
     if (req.method === "GET" && req.url === "/health") {
       const [recipes, vault] = await Promise.all([
@@ -769,19 +837,31 @@ async function serve() {
     send(res, 404, { error: "Not found." }, origin);
   });
 
-  server.listen(port, "127.0.0.1", () => {
-    console.log(`LinkTide worker listening on http://127.0.0.1:${port}`);
-    console.log("Browser automation stays on this machine.");
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve());
   });
 
-  const shutdown = async () => {
-    server.close();
+  console.log(`LinkTide worker listening on http://127.0.0.1:${port}`);
+  console.log("Browser automation stays on this machine.");
+
+  const close = async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await browserContext?.close().catch(() => undefined);
-    process.exit(0);
+    browserContext = undefined;
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  if (process.env.LINKTIDE_EMBEDDED !== "1") {
+    const shutdown = async () => {
+      await close();
+      process.exit(0);
+    };
+
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+  }
+
+  return { server, close, port };
 }
 
 async function doctor() {
@@ -822,7 +902,7 @@ async function doctor() {
 
 async function main() {
   if (command === "serve") {
-    await serve();
+    await startWorkerServer();
     return;
   }
 
@@ -851,7 +931,9 @@ async function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (process.env.LINKTIDE_EMBEDDED !== "1") {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

@@ -19,7 +19,8 @@
     "@linktide/submissions": "workspace:*",
     "@linktide/vault": "workspace:*",
     "dotenv": "latest",
-    "playwright": "latest"
+    "playwright": "latest",
+    "@linktide/control-plane": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "latest",
