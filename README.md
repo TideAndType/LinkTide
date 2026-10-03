@@ -55,9 +55,28 @@ Copy `.env.example` to `.env` and configure:
 LM_STUDIO_BASE_URL=https://your-tunnel.example.com/v1
 LM_STUDIO_MODEL=your-model-name
 LM_STUDIO_API_KEY=
+BRAVE_SEARCH_API_KEY=your-brave-search-key
 ```
 
 Do not expose an unauthenticated LM Studio endpoint directly to the public internet.
+
+## Live discovery
+
+LinkTide uses a search provider to retrieve real candidate sites, then LM Studio evaluates those candidates for niche relevance, spam risk, and likely submission potential.
+
+The first provider is Brave Search API. Keep `BRAVE_SEARCH_API_KEY` server-side in `.env`; it is never sent to the browser.
+
+The current discovery run:
+
+1. Takes a limited batch of generated search queries.
+2. Retrieves web results.
+3. Deduplicates results by domain.
+4. Excludes the business's own domain.
+5. Sends candidate metadata to LM Studio in batches.
+6. Sorts results into `queue`, `review`, or `skip`.
+7. Stores the resulting queue locally in the dashboard browser.
+
+A queued opportunity still needs site inspection before automated submission. CAPTCHA, payment, verification, and agreements remain human checkpoints.
 
 ## Status
 
