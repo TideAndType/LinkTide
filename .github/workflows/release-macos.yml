@@ -1,0 +1,58 @@
+name: Release macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (example: 0.1.0)"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build DMG
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set release version
+        run: |
+          node -e 'const fs=require("fs");const p=require("./package.json");p.version=process.env.RELEASE_VERSION;fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")'
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build desktop app
+        run: pnpm build:desktop
+
+      - name: Build, sign, notarize, and publish
+        run: pnpm exec electron-builder --mac --universal --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

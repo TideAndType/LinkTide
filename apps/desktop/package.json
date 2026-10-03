@@ -1,0 +1,16 @@
+{
+  "name": "@linktide/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@linktide/worker": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "electron": "latest",
+    "typescript": "latest"
+  }
+}
