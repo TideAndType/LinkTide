@@ -4,12 +4,16 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "serve": "tsx src/index.ts serve",
+    "doctor": "tsx src/index.ts doctor",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@linktide/browser": "workspace:*",
     "@linktide/discovery": "workspace:*",
+    "@linktide/form-mapper": "workspace:*",
     "@linktide/lm-studio": "workspace:*",
+    "@linktide/submissions": "workspace:*",
     "dotenv": "latest"
   },
   "devDependencies": {
