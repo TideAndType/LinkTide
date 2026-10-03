@@ -22,6 +22,40 @@ type DiscoveryPlan = {
   queries: string[];
 };
 
+type QualifiedOpportunity = {
+  id: string;
+  title: string;
+  url: string;
+  domain: string;
+  description: string;
+  query: string;
+  opportunityType:
+    | "local_citation"
+    | "industry_directory"
+    | "association"
+    | "partner_directory"
+    | "resource_page"
+    | "sponsorship"
+    | "other";
+  relevanceScore: number;
+  spamRisk: "low" | "medium" | "high";
+  submissionLikely: boolean;
+  action: "queue" | "review" | "skip";
+  reason: string;
+};
+
+type SearchRun = {
+  provider: string;
+  aiUsed: boolean;
+  searchesRun: number;
+  rawResults: number;
+  uniqueDomains: number;
+  queued: number;
+  review: number;
+  skipped: number;
+  opportunities: QualifiedOpportunity[];
+};
+
 const emptyProfile: BusinessProfile = {
   name: "",
   website: "",
@@ -51,6 +85,8 @@ export function LinkTideDashboard() {
   const [lmMessage, setLmMessage] = useState("Not tested yet");
   const [discovering, setDiscovering] = useState(false);
   const [plan, setPlan] = useState<DiscoveryPlan | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchRun, setSearchRun] = useState<SearchRun | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -62,6 +98,17 @@ export function LinkTideDashboard() {
       setSaved(true);
     } catch {
       window.localStorage.removeItem("linktide.businessProfile");
+    }
+  }, []);
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem("linktide.opportunityQueue");
+    if (!raw) return;
+
+    try {
+      setSearchRun(JSON.parse(raw));
+    } catch {
+      window.localStorage.removeItem("linktide.opportunityQueue");
     }
   }, []);
 
@@ -151,12 +198,58 @@ export function LinkTideDashboard() {
       }
 
       setPlan(result);
+      setSearchRun(null);
+      window.localStorage.removeItem("linktide.opportunityQueue");
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Could not create discovery plan."
       );
     } finally {
       setDiscovering(false);
+    }
+  }
+
+  async function searchAndQualify() {
+    if (!plan?.queries.length) {
+      setError("Build a discovery plan before running live search.");
+      return;
+    }
+
+    setSearching(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/discovery/search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          business: {
+            name: profile.name,
+            website: profile.website,
+            primaryCategory: profile.primaryCategory,
+            niches: splitCsv(profile.niches),
+            services: splitCsv(profile.services),
+            locations: splitCsv(profile.locations)
+          },
+          queries: plan.queries
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Live discovery failed.");
+      }
+
+      setSearchRun(result);
+      window.localStorage.setItem(
+        "linktide.opportunityQueue",
+        JSON.stringify(result)
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Live discovery failed.");
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -203,8 +296,8 @@ export function LinkTideDashboard() {
           <strong>{plan?.queries.length ?? 0}</strong>
         </article>
         <article className="card">
-          <span>AI expansion</span>
-          <strong>{plan?.aiUsed ? "On" : "—"}</strong>
+          <span>Qualified opportunities</span>
+          <strong>{searchRun?.opportunities.length ?? 0}</strong>
         </article>
       </section>
 
@@ -407,10 +500,20 @@ export function LinkTideDashboard() {
             </div>
 
             <div className="queryHeader">
-              <h3>{plan.queries.length} search queries ready</h3>
-              <span className="muted tiny">
-                Actual search + qualification is the next engine layer.
-              </span>
+              <div>
+                <h3>{plan.queries.length} search queries ready</h3>
+                <span className="muted tiny">
+                  LinkTide will run a limited batch, dedupe domains, then ask LM Studio to qualify each candidate.
+                </span>
+              </div>
+              <button
+                className="primary"
+                onClick={searchAndQualify}
+                type="button"
+                disabled={searching}
+              >
+                {searching ? "Searching & qualifying..." : "Search & Qualify"}
+              </button>
             </div>
 
             <div className="queryList">
@@ -419,6 +522,76 @@ export function LinkTideDashboard() {
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <code>{query}</code>
                 </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="sectionHeading">
+          <div>
+            <p className="eyebrow">OPPORTUNITY QUEUE</p>
+            <h2>Qualified backlink and citation candidates</h2>
+          </div>
+          {searchRun ? (
+            <span className={searchRun.aiUsed ? "status good" : "status"}>
+              {searchRun.aiUsed ? "LM Studio qualified" : "Fallback review"}
+            </span>
+          ) : null}
+        </div>
+
+        {!searchRun ? (
+          <div className="emptyState">
+            <strong>No live search has run yet.</strong>
+            <p>Build the discovery plan, then click <b>Search &amp; Qualify</b>.</p>
+          </div>
+        ) : (
+          <>
+            <div className="runStats">
+              <div><span>Searches</span><strong>{searchRun.searchesRun}</strong></div>
+              <div><span>Raw results</span><strong>{searchRun.rawResults}</strong></div>
+              <div><span>Unique domains</span><strong>{searchRun.uniqueDomains}</strong></div>
+              <div><span>Queue</span><strong>{searchRun.queued}</strong></div>
+              <div><span>Review</span><strong>{searchRun.review}</strong></div>
+              <div><span>Skipped</span><strong>{searchRun.skipped}</strong></div>
+            </div>
+
+            <div className="opportunityList">
+              {searchRun.opportunities.map((item) => (
+                <article className="opportunity" key={item.id}>
+                  <div className="opportunityMain">
+                    <div className="opportunityTitleRow">
+                      <a href={item.url} target="_blank" rel="noreferrer">
+                        {item.title}
+                      </a>
+                      <span className={`actionPill ${item.action}`}>{item.action}</span>
+                    </div>
+                    <p className="domain">{item.domain}</p>
+                    <p className="muted opportunityDescription">
+                      {item.description || "No search snippet available."}
+                    </p>
+                    <p className="reason">{item.reason}</p>
+                  </div>
+
+                  <div className="opportunityMeta">
+                    <div className="scoreBox">
+                      <span>Relevance</span>
+                      <strong>{item.relevanceScore}</strong>
+                    </div>
+                    <span className={`riskPill ${item.spamRisk}`}>
+                      {item.spamRisk} spam risk
+                    </span>
+                    <span className="typePill">
+                      {item.opportunityType.replaceAll("_", " ")}
+                    </span>
+                    {item.submissionLikely ? (
+                      <span className="status good">Submission path likely</span>
+                    ) : (
+                      <span className="status">Needs inspection</span>
+                    )}
+                  </div>
+                </article>
               ))}
             </div>
           </>
