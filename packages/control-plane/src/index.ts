@@ -226,6 +226,119 @@ export async function getPublicSettings(dataDirectory: string) {
   return publicSettings(await loadSettings(dataDirectory));
 }
 
+export type LoadedLmStudioModel = {
+  id: string;
+  label: string;
+  loadedInstances: number;
+};
+
+type NativeLmStudioModelsResponse = {
+  models?: Array<{
+    key?: string;
+    display_name?: string;
+    type?: string;
+    loaded_instances?: unknown[];
+  }>;
+};
+
+function nativeModelsUrl(baseUrl: string) {
+  const url = new URL(baseUrl);
+  let path = url.pathname.replace(/\/+$/, "");
+  path = path.replace(/\/v1$/i, "");
+  url.pathname = `${path}/api/v1/models`.replace(/\/{2,}/g, "/");
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+export async function listLoadedLmStudioModels(input?: {
+  baseUrl?: string;
+  apiKey?: string;
+}) {
+  const baseUrl =
+    input?.baseUrl?.trim() ||
+    process.env.LM_STUDIO_BASE_URL?.trim() ||
+    "";
+
+  if (!baseUrl) {
+    return {
+      status: 400,
+      body: {
+        configured: false,
+        models: [] as LoadedLmStudioModel[],
+        error: "Add your LM Studio tunnel URL first."
+      }
+    };
+  }
+
+  const apiKey =
+    input?.apiKey?.trim() ||
+    process.env.LM_STUDIO_API_KEY?.trim() ||
+    "";
+
+  try {
+    const response = await fetch(nativeModelsUrl(baseUrl), {
+      headers: {
+        accept: "application/json",
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
+      }
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      return {
+        status: 502,
+        body: {
+          configured: true,
+          models: [] as LoadedLmStudioModel[],
+          error: `LM Studio model discovery failed: ${response.status} ${detail.slice(0, 180)}`
+        }
+      };
+    }
+
+    const payload = (await response.json()) as NativeLmStudioModelsResponse;
+    const models = (payload.models ?? [])
+      .filter(
+        (model) =>
+          model.type === "llm" &&
+          Array.isArray(model.loaded_instances) &&
+          model.loaded_instances.length > 0 &&
+          typeof model.key === "string" &&
+          model.key.trim()
+      )
+      .map((model) => ({
+        id: model.key as string,
+        label:
+          typeof model.display_name === "string" && model.display_name.trim()
+            ? model.display_name
+            : (model.key as string),
+        loadedInstances: model.loaded_instances?.length ?? 0
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    return {
+      status: 200,
+      body: {
+        configured: true,
+        models,
+        count: models.length
+      }
+    };
+  } catch (error) {
+    return {
+      status: 502,
+      body: {
+        configured: true,
+        models: [] as LoadedLmStudioModel[],
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not reach LM Studio model discovery."
+      }
+    };
+  }
+}
+
 function lmClient() {
   const baseUrl = process.env.LM_STUDIO_BASE_URL;
   const model = process.env.LM_STUDIO_MODEL;
