@@ -8,11 +8,10 @@ import {
 import {
   inspectOpportunity,
   launchAutomationBrowser,
-  type BrowserContext,
   type FormFieldDescriptor,
   type OpportunityInspection
 } from "@linktide/browser";
-import type { Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import { generateDirectoryQueries } from "@linktide/discovery";
 import {
   calculateMappingQuality,
