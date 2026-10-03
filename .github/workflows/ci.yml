@@ -9,7 +9,7 @@ on:
 jobs:
   typecheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
@@ -31,5 +31,8 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Build static dashboard
-        run: pnpm build:dashboard
+      - name: Build desktop bundle
+        run: pnpm build:desktop
+
+      - name: Verify desktop entry
+        run: test -s dist/desktop/main.cjs

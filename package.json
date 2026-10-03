@@ -1,6 +1,11 @@
 {
   "name": "linktide",
   "version": "0.1.0",
+  "description": "Local-first backlink discovery, citation management, and guarded directory submission for macOS.",
+  "author": {
+    "name": "Tide & Type Co.",
+    "url": "https://tideandtype.com"
+  },
   "private": true,
   "main": "dist/desktop/main.cjs",
   "scripts": {
@@ -9,10 +14,10 @@
     "worker:doctor": "pnpm --filter @linktide/worker doctor",
     "typecheck": "pnpm -r typecheck",
     "build:dashboard": "pnpm --filter @linktide/dashboard build",
-    "build:desktop": "pnpm build:dashboard && esbuild apps/desktop/src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/desktop/main.cjs --external:electron --external:electron-updater --external:playwright",
+    "build:desktop": "pnpm build:dashboard && esbuild apps/desktop/src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/desktop/main.cjs --external:electron --external:playwright",
     "desktop:dev": "pnpm build:desktop && electron .",
-    "desktop:pack": "pnpm build:desktop && electron-builder --mac --dir",
-    "desktop:dmg": "pnpm build:desktop && electron-builder --mac --universal --publish never"
+    "desktop:pack": "pnpm build:desktop && electron-builder --config electron-builder.config.cjs --mac --dir",
+    "desktop:dmg": "pnpm build:desktop && electron-builder --config electron-builder.config.cjs --mac --universal --publish never"
   },
   "dependencies": {
     "playwright": "latest"

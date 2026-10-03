@@ -6,7 +6,7 @@ module.exports = {
     output: "release"
   },
   files: [
-    "dist/desktop/**/*",
+    "dist/desktop/main.cjs",
     "package.json"
   ],
   extraResources: [

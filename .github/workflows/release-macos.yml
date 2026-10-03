@@ -47,8 +47,14 @@ jobs:
       - name: Build desktop app
         run: pnpm build:desktop
 
+      - name: Verify desktop entry
+        run: |
+          test -s dist/desktop/main.cjs
+          echo "Desktop entry exists:"
+          ls -lh dist/desktop/main.cjs
+
       - name: Build universal DMG
-        run: pnpm exec electron-builder --mac --universal --publish never
+        run: pnpm exec electron-builder --config electron-builder.config.cjs --mac --universal --publish never
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
