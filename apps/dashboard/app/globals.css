@@ -448,3 +448,27 @@ code {
   background: rgba(239, 197, 92, .11);
   color: #f1cf77;
 }
+
+.queueHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.batchBanner {
+  margin-top: 18px;
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(151, 211, 194, .12);
+  background: rgba(255, 255, 255, .035);
+  color: #b8cbc5;
+  font-size: .8rem;
+}
+
+.batchBanner.active {
+  border-color: rgba(98, 226, 188, .2);
+  background: rgba(98, 226, 188, .065);
+  color: #8ee6cb;
+}
