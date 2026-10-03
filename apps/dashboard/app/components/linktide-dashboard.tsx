@@ -91,6 +91,41 @@ type SearchRun = {
 
 type WorkerState = "checking" | "online" | "offline";
 
+type SubmissionHistoryStatus =
+  | "pending"
+  | "verification_required"
+  | "live"
+  | "rejected"
+  | "needs_attention"
+  | "failed";
+
+type SubmissionHistoryRecord = {
+  id: string;
+  businessName: string;
+  businessWebsite: string;
+  domain: string;
+  opportunityUrl: string;
+  submissionUrl?: string;
+  listingUrl?: string;
+  status: SubmissionHistoryStatus;
+  submissionStatus?: string;
+  submittedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastVerifiedAt?: string;
+  backlinkFound: boolean;
+  backlinkUrl?: string;
+  backlinkText?: string;
+  backlinkRel?: {
+    nofollow: boolean;
+    ugc: boolean;
+    sponsored: boolean;
+  };
+  httpStatus?: number;
+  verificationNote?: string;
+  reasons: string[];
+};
+
 type AutomationResult = {
   status?: string;
   submitted?: boolean;
@@ -172,6 +207,20 @@ function percent(value?: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function formatDate(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+
 export function LinkTideDashboard() {
   const [profile, setProfile] = useState<BusinessProfile>(emptyProfile);
   const [saved, setSaved] = useState(false);
@@ -200,6 +249,8 @@ export function LinkTideDashboard() {
   const [automationResults, setAutomationResults] = useState<
     Record<string, AutomationResult>
   >({});
+  const [history, setHistory] = useState<SubmissionHistoryRecord[]>([]);
+  const [verifyingHistoryId, setVerifyingHistoryId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -222,7 +273,7 @@ export function LinkTideDashboard() {
       }
     }
 
-    void Promise.all([testWorker(), loadSettings()]);
+    void Promise.all([testWorker(), loadSettings(), loadHistory()]);
   }, []);
 
   useEffect(() => {
@@ -311,6 +362,58 @@ export function LinkTideDashboard() {
       instagram: profile.instagram || undefined,
       logoPath: profile.logoPath || undefined
     };
+  }
+
+  async function loadHistory() {
+    try {
+      const response = await fetch(`${workerUrl}/history`);
+      const result = (await response.json()) as {
+        records?: SubmissionHistoryRecord[];
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Could not load submission history.");
+      }
+
+      setHistory(Array.isArray(result.records) ? result.records : []);
+    } catch {
+      // History is supplementary; worker status handles the visible service error.
+    }
+  }
+
+  async function verifyHistoryRecord(id: string) {
+    setVerifyingHistoryId(id);
+    setError("");
+
+    try {
+      const response = await fetch(`${workerUrl}/history/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+
+      const result = (await response.json()) as {
+        record?: SubmissionHistoryRecord;
+        error?: string;
+      };
+
+      if (!response.ok || !result.record) {
+        throw new Error(result.error ?? "Backlink verification failed.");
+      }
+
+      setHistory((current) =>
+        current.map((record) =>
+          record.id === result.record?.id ? result.record : record
+        )
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Backlink verification failed."
+      );
+    } finally {
+      setVerifyingHistoryId(null);
+    }
   }
 
   async function loadSettings() {
@@ -628,6 +731,10 @@ export function LinkTideDashboard() {
         ...current,
         [item.id]: result
       }));
+
+      if (mode === "submit") {
+        await loadHistory();
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Automation job failed.");
     } finally {
@@ -1209,6 +1316,138 @@ export function LinkTideDashboard() {
                       ) : (
                         <span className="status">Needs inspection</span>
                       )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="sectionHeading">
+          <div>
+            <p className="eyebrow">HISTORY & VERIFICATION</p>
+            <h2>Submitted listings and live backlinks</h2>
+          </div>
+          <button
+            className="secondary smallButton"
+            type="button"
+            onClick={loadHistory}
+          >
+            Refresh History
+          </button>
+        </div>
+
+        {!history.length ? (
+          <div className="emptyState">
+            <strong>No submission history yet.</strong>
+            <p>Successful and blocked submission attempts will appear here automatically.</p>
+          </div>
+        ) : (
+          <>
+            <div className="historyStats">
+              <div>
+                <span>Total</span>
+                <strong>{history.length}</strong>
+              </div>
+              <div>
+                <span>Live</span>
+                <strong>{history.filter((item) => item.status === "live").length}</strong>
+              </div>
+              <div>
+                <span>Pending</span>
+                <strong>
+                  {history.filter((item) =>
+                    ["pending", "verification_required"].includes(item.status)
+                  ).length}
+                </strong>
+              </div>
+              <div>
+                <span>Needs attention</span>
+                <strong>
+                  {history.filter((item) =>
+                    ["needs_attention", "failed", "rejected"].includes(item.status)
+                  ).length}
+                </strong>
+              </div>
+            </div>
+
+            <div className="historyList">
+              {history.map((record) => {
+                const rel = record.backlinkRel;
+                const linkType = record.backlinkFound
+                  ? rel?.sponsored
+                    ? "sponsored"
+                    : rel?.ugc
+                      ? "ugc"
+                      : rel?.nofollow
+                        ? "nofollow"
+                        : "follow"
+                  : "not verified";
+
+                return (
+                  <article className="historyItem" key={record.id}>
+                    <div className="historyMain">
+                      <div className="historyTitleRow">
+                        <strong>{record.domain}</strong>
+                        <span className={`historyStatus ${record.status}`}>
+                          {record.status.replaceAll("_", " ")}
+                        </span>
+                      </div>
+
+                      <p className="tiny muted">
+                        {record.businessName} · submitted {formatDate(record.submittedAt ?? record.createdAt)}
+                      </p>
+
+                      {record.verificationNote ? (
+                        <p className="historyNote">{record.verificationNote}</p>
+                      ) : null}
+
+                      {record.reasons.length ? (
+                        <p className="tiny automationWarning">
+                          {record.reasons.join(" ")}
+                        </p>
+                      ) : null}
+
+                      <div className="historyLinks">
+                        <a href={record.opportunityUrl} target="_blank" rel="noreferrer">
+                          Opportunity
+                        </a>
+                        {record.listingUrl ? (
+                          <a href={record.listingUrl} target="_blank" rel="noreferrer">
+                            Listing
+                          </a>
+                        ) : null}
+                        {record.backlinkUrl ? (
+                          <a href={record.backlinkUrl} target="_blank" rel="noreferrer">
+                            Backlink
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="historyMeta">
+                      <span className={`linkType ${record.backlinkFound ? "found" : ""}`}>
+                        {linkType}
+                      </span>
+                      <span className="tiny muted">
+                        Last checked: {formatDate(record.lastVerifiedAt)}
+                      </span>
+                      {record.httpStatus ? (
+                        <span className="tiny muted">HTTP {record.httpStatus}</span>
+                      ) : null}
+                      <button
+                        className="secondary smallButton"
+                        type="button"
+                        disabled={verifyingHistoryId !== null}
+                        onClick={() => verifyHistoryRecord(record.id)}
+                      >
+                        {verifyingHistoryId === record.id
+                          ? "Verifying..."
+                          : "Verify Backlink"}
+                      </button>
                     </div>
                   </article>
                 );
