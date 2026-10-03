@@ -534,3 +534,143 @@ code {
 select {
   appearance: auto;
 }
+
+.historyStats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.historyStats > div {
+  padding: 14px;
+  background: #0a1b17;
+  border: 1px solid rgba(151, 211, 194, .09);
+  border-radius: 12px;
+}
+
+.historyStats span {
+  display: block;
+  color: #7f9890;
+  font-size: .7rem;
+}
+
+.historyStats strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.35rem;
+}
+
+.historyList {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.historyItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 20px;
+  padding: 17px;
+  border: 1px solid rgba(151, 211, 194, .09);
+  border-radius: 14px;
+  background: #0a1b17;
+}
+
+.historyTitleRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.historyTitleRow strong {
+  font-size: .95rem;
+}
+
+.historyStatus,
+.linkType {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 6px 9px;
+  font-size: .68rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.historyStatus.live,
+.linkType.found {
+  color: #79e4c4;
+  background: rgba(98, 226, 188, .11);
+}
+
+.historyStatus.pending,
+.historyStatus.verification_required {
+  color: #f1cf77;
+  background: rgba(239, 197, 92, .1);
+}
+
+.historyStatus.needs_attention,
+.historyStatus.failed,
+.historyStatus.rejected {
+  color: #ffaaaa;
+  background: rgba(255, 108, 108, .1);
+}
+
+.linkType {
+  color: #9eb2ac;
+  background: rgba(255, 255, 255, .05);
+}
+
+.historyNote {
+  margin: 9px 0 0;
+  color: #bdd0ca;
+  font-size: .78rem;
+  line-height: 1.55;
+}
+
+.historyLinks {
+  display: flex;
+  gap: 12px;
+  margin-top: 11px;
+  flex-wrap: wrap;
+}
+
+.historyLinks a {
+  color: #72dfbf;
+  font-size: .75rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.historyLinks a:hover {
+  text-decoration: underline;
+}
+
+.historyMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 980px) {
+  .historyStats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .historyItem {
+    grid-template-columns: 1fr;
+  }
+
+  .historyMeta {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .historyStats {
+    grid-template-columns: 1fr;
+  }
+}

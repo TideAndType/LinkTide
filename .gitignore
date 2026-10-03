@@ -11,3 +11,5 @@ data/linktide.db
 data/linktide.db-*
 data/credentials.vault.json
 data/directories/*.json
+data/submission-history.json
+data/submission-history.json.tmp
