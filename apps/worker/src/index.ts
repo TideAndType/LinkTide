@@ -15,6 +15,7 @@ import type { BrowserContext, Page } from "playwright";
 import {
   createDiscoveryPlan,
   getPublicSettings,
+  listLoadedLmStudioModels,
   loadSettings,
   runDiscoverySearch,
   testLmStudioConnection,
@@ -676,6 +677,33 @@ export async function startWorkerServer() {
     if (req.method === "POST" && req.url === "/lm-studio/test") {
       const result = await testLmStudioConnection();
       send(res, result.status, result.body, origin);
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/lm-studio/models") {
+      try {
+        const body = await readJson(req);
+        const result = await listLoadedLmStudioModels({
+          baseUrl:
+            typeof body.baseUrl === "string" ? body.baseUrl : undefined,
+          apiKey:
+            typeof body.apiKey === "string" ? body.apiKey : undefined
+        });
+        send(res, result.status, result.body, origin);
+      } catch (error) {
+        send(
+          res,
+          500,
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not discover LM Studio models.",
+            models: []
+          },
+          origin
+        );
+      }
       return;
     }
 
