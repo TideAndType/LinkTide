@@ -23,6 +23,13 @@ import {
 } from "@linktide/control-plane";
 import { generateDirectoryQueries } from "@linktide/discovery";
 import {
+  createSubmissionHistoryRecord,
+  getSubmissionHistoryRecord,
+  listSubmissionHistory,
+  updateSubmissionHistoryRecord,
+  type SubmissionHistoryStatus
+} from "@linktide/history";
+import {
   calculateMappingQuality,
   mapFieldsHeuristically,
   mapFieldsWithLmStudio,
@@ -71,6 +78,10 @@ function recipeDir() {
 
 function vaultPath() {
   return join(dataDir(), "credentials.vault.json");
+}
+
+function historyPath() {
+  return join(dataDir(), "submission-history.json");
 }
 
 function domainOf(value: string) {
@@ -597,6 +608,192 @@ async function submitJob(input: {
   }
 }
 
+function deriveHistoryStatus(result: unknown): SubmissionHistoryStatus {
+  if (!result || typeof result !== "object") return "failed";
+
+  const value = result as Record<string, unknown>;
+  const status = typeof value.status === "string" ? value.status : "";
+  const submitted = value.submitted === true;
+
+  if (status === "verification_required") return "verification_required";
+  if (submitted) return "pending";
+  if (
+    status === "review_required" ||
+    status === "human_action_required"
+  ) {
+    return "needs_attention";
+  }
+  if (status === "failed") return "failed";
+  return "needs_attention";
+}
+
+function resultString(result: unknown, key: string) {
+  if (!result || typeof result !== "object") return undefined;
+  const value = (result as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function resultReasons(result: unknown) {
+  if (!result || typeof result !== "object") return [];
+  const value = (result as Record<string, unknown>).reasons;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function resultSubmissionUrl(result: unknown) {
+  if (!result || typeof result !== "object") return undefined;
+  const inspection = (result as Record<string, unknown>).inspection;
+  if (!inspection || typeof inspection !== "object") return undefined;
+  const value = (inspection as Record<string, unknown>).submissionPageUrl;
+  return typeof value === "string" ? value : undefined;
+}
+
+async function recordSubmissionAttempt(input: {
+  url: string;
+  business: BusinessSubmissionProfile;
+  result: unknown;
+}) {
+  const status = deriveHistoryStatus(input.result);
+  const afterUrl = resultString(input.result, "afterUrl");
+  const submissionUrl = resultSubmissionUrl(input.result);
+  const submitted =
+    Boolean(
+      input.result &&
+      typeof input.result === "object" &&
+      (input.result as Record<string, unknown>).submitted === true
+    );
+
+  return createSubmissionHistoryRecord({
+    path: historyPath(),
+    businessName: input.business.name,
+    businessWebsite: input.business.website,
+    domain: domainOf(input.url),
+    opportunityUrl: input.url,
+    submissionUrl,
+    listingUrl: afterUrl,
+    status,
+    submissionStatus: resultString(input.result, "status"),
+    submitted,
+    reasons: resultReasons(input.result)
+  });
+}
+
+async function verifyHistoryRecord(id: string) {
+  const record = await getSubmissionHistoryRecord(historyPath(), id);
+
+  if (!record) {
+    throw new Error("Submission history record was not found.");
+  }
+
+  const targetUrl =
+    record.listingUrl ??
+    record.submissionUrl ??
+    record.opportunityUrl;
+
+  const context = await getBrowser();
+  const page = await context.newPage();
+
+  try {
+    const response = await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 35_000
+    });
+
+    const httpStatus = response?.status();
+    const finalUrl = page.url();
+    const businessDomain = domainOf(record.businessWebsite);
+
+    const links = await page.locator("a[href]").evaluateAll((anchors) =>
+      anchors.slice(0, 1500).map((anchor) => {
+        const el = anchor as HTMLAnchorElement;
+        return {
+          href: el.href,
+          text: (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 240),
+          rel: el.getAttribute("rel") ?? ""
+        };
+      })
+    );
+
+    const backlink = links.find((link) => {
+      try {
+        const hostname = new URL(link.href)
+          .hostname.toLowerCase()
+          .replace(/^www\./, "");
+
+        return (
+          hostname === businessDomain ||
+          hostname.endsWith(`.${businessDomain}`)
+        );
+      } catch {
+        return false;
+      }
+    });
+
+    const bodyText = (
+      await page.locator("body").innerText().catch(() => "")
+    ).toLowerCase();
+
+    const rejectedSignal =
+      httpStatus === 404 ||
+      httpStatus === 410 ||
+      /(listing not found|listing has been removed|page not found|submission rejected|listing rejected)/i.test(
+        bodyText
+      );
+
+    const relTokens = new Set(
+      (backlink?.rel ?? "")
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+    );
+
+    const now = new Date().toISOString();
+    const status: SubmissionHistoryStatus = backlink
+      ? "live"
+      : rejectedSignal
+        ? "rejected"
+        : httpStatus && httpStatus >= 500
+          ? "needs_attention"
+          : "pending";
+
+    const note = backlink
+      ? `Backlink verified on ${finalUrl}.`
+      : rejectedSignal
+        ? "Listing appears unavailable or rejected."
+        : "Listing page checked; backlink not visible yet.";
+
+    return updateSubmissionHistoryRecord(historyPath(), id, {
+      status,
+      listingUrl: finalUrl,
+      lastVerifiedAt: now,
+      backlinkFound: Boolean(backlink),
+      backlinkUrl: backlink?.href,
+      backlinkText: backlink?.text,
+      backlinkRel: backlink
+        ? {
+            nofollow: relTokens.has("nofollow"),
+            ugc: relTokens.has("ugc"),
+            sponsored: relTokens.has("sponsored")
+          }
+        : undefined,
+      httpStatus,
+      verificationNote: note
+    });
+  } catch (error) {
+    return updateSubmissionHistoryRecord(historyPath(), id, {
+      status: "needs_attention",
+      lastVerifiedAt: new Date().toISOString(),
+      backlinkFound: false,
+      verificationNote:
+        error instanceof Error
+          ? `Verification failed: ${error.message}`
+          : "Verification failed."
+    });
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
 async function readJson(req: IncomingMessage) {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -805,6 +1002,64 @@ export async function startWorkerServer() {
       return;
     }
 
+    if (req.method === "GET" && req.url === "/history") {
+      const records = await listSubmissionHistory(historyPath());
+      send(
+        res,
+        200,
+        {
+          count: records.length,
+          records
+        },
+        origin
+      );
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/history/verify") {
+      if (busy) {
+        send(
+          res,
+          409,
+          { error: "The LinkTide worker is already running a browser job." },
+          origin
+        );
+        return;
+      }
+
+      busy = true;
+      try {
+        const body = await readJson(req);
+        if (typeof body.id !== "string" || !body.id.trim()) {
+          send(res, 400, { error: "A history record id is required." }, origin);
+          return;
+        }
+
+        const record = await verifyHistoryRecord(body.id);
+        if (!record) {
+          send(res, 404, { error: "History record not found." }, origin);
+          return;
+        }
+
+        send(res, 200, { record }, origin);
+      } catch (error) {
+        send(
+          res,
+          500,
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Backlink verification failed."
+          },
+          origin
+        );
+      } finally {
+        busy = false;
+      }
+      return;
+    }
+
     if (
       req.method === "POST" &&
       (req.url === "/inspect" || req.url === "/submit")
@@ -840,12 +1095,26 @@ export async function startWorkerServer() {
           return;
         }
 
-        const result =
-          req.url === "/inspect"
-            ? await inspectJob(body)
-            : await submitJob(body);
-
-        send(res, 200, result, origin);
+        if (req.url === "/inspect") {
+          const result = await inspectJob(body);
+          send(res, 200, result, origin);
+        } else {
+          const result = await submitJob(body);
+          const historyRecord = await recordSubmissionAttempt({
+            url: body.url,
+            business: body.business,
+            result
+          });
+          send(
+            res,
+            200,
+            {
+              ...result,
+              historyRecord
+            },
+            origin
+          );
+        }
       } catch (error) {
         send(
           res,

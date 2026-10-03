@@ -20,7 +20,8 @@
     "@linktide/vault": "workspace:*",
     "dotenv": "latest",
     "playwright": "latest",
-    "@linktide/control-plane": "workspace:*"
+    "@linktide/control-plane": "workspace:*",
+    "@linktide/history": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "latest",
