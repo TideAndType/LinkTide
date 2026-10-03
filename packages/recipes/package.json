@@ -1,0 +1,17 @@
+{
+  "name": "@linktide/recipes",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@linktide/browser": "workspace:*",
+    "@linktide/form-mapper": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}

@@ -9,3 +9,5 @@ playwright/.auth
 browser-profile
 data/linktide.db
 data/linktide.db-*
+data/credentials.vault.json
+data/directories/*.json

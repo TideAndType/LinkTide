@@ -1,0 +1,16 @@
+{
+  "name": "@linktide/accounts",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@linktide/browser": "workspace:*",
+    "playwright": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}
