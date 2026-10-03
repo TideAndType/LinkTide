@@ -26,5 +26,6 @@
     "@types/node": "latest",
     "tsx": "latest",
     "typescript": "latest"
-  }
+  },
+  "exports": "./src/index.ts"
 }

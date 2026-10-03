@@ -1,17 +1,27 @@
 {
   "name": "linktide",
+  "version": "0.1.0",
   "private": true,
+  "main": "dist/desktop/main.cjs",
   "scripts": {
-    "setup": "node scripts/setup.mjs",
-    "start": "node scripts/start.mjs",
     "dev": "pnpm --filter @linktide/dashboard dev",
     "worker": "pnpm --filter @linktide/worker serve",
     "worker:doctor": "pnpm --filter @linktide/worker doctor",
-    "worker:key": "pnpm --filter @linktide/worker generate-vault-key",
     "typecheck": "pnpm -r typecheck",
-    "install:browsers": "pnpm --filter @linktide/browser exec playwright install chromium"
+    "build:dashboard": "pnpm --filter @linktide/dashboard build",
+    "build:desktop": "pnpm build:dashboard && esbuild apps/desktop/src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/desktop/main.cjs --external:electron --external:electron-updater --external:playwright",
+    "desktop:dev": "pnpm build:desktop && electron .",
+    "desktop:pack": "pnpm build:desktop && electron-builder --mac --dir",
+    "desktop:dmg": "pnpm build:desktop && electron-builder --mac --universal --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "latest",
+    "playwright": "latest"
   },
   "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "^26.0.0",
+    "esbuild": "latest",
     "typescript": "latest"
   },
   "packageManager": "pnpm@12.8.1"
