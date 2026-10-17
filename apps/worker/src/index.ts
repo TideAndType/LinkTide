@@ -161,16 +161,28 @@ async function mapFields(
 }
 
 let browserContext: BrowserContext | undefined;
+let browserStartup: Promise<BrowserContext> | undefined;
 
 async function getBrowser() {
   if (browserContext) return browserContext;
 
-  browserContext = await launchAutomationBrowser({
-    profileDir: process.env.LINKTIDE_BROWSER_PROFILE ?? "./browser-profile",
-    headless: envBoolean(process.env.LINKTIDE_HEADLESS, false)
-  });
+  // All parallel jobs must share a single browser startup, not race to launch
+  // multiple persistent Chromium contexts on the same profile directory.
+  if (!browserStartup) {
+    browserStartup = launchAutomationBrowser({
+      profileDir: process.env.LINKTIDE_BROWSER_PROFILE ?? "./browser-profile",
+      headless: envBoolean(process.env.LINKTIDE_HEADLESS, false)
+    })
+      .then((context) => {
+        browserContext = context;
+        return context;
+      })
+      .finally(() => {
+        browserStartup = undefined;
+      });
+  }
 
-  return browserContext;
+  return browserStartup;
 }
 
 async function openOpportunity(
@@ -454,6 +466,7 @@ async function submitJob(input: {
   business: BusinessSubmissionProfile;
   autoSubmit?: boolean;
   autoCreateAccount?: boolean;
+  holdForHuman?: boolean;
 }) {
   const context = await getBrowser();
   const domain = domainOf(input.url);
@@ -481,7 +494,7 @@ async function submitJob(input: {
       });
 
       if (!account.authenticated) {
-        leaveOpenForHuman = true;
+        leaveOpenForHuman = input.holdForHuman !== false;
 
         return {
           status:
@@ -489,7 +502,7 @@ async function submitJob(input: {
               ? "verification_required"
               : "review_required",
           submitted: false,
-          browserLeftOpen: true,
+          browserLeftOpen: leaveOpenForHuman,
           inspection,
           account: {
             status: account.status,
@@ -511,11 +524,11 @@ async function submitJob(input: {
     const form = pickForm(inspection);
 
     if (!form) {
-      leaveOpenForHuman = true;
+      leaveOpenForHuman = input.holdForHuman !== false;
       return {
         status: "review_required",
         submitted: false,
-        browserLeftOpen: true,
+        browserLeftOpen: leaveOpenForHuman,
         inspection,
         account,
         reasons: ["No usable submission form was found."]
@@ -577,7 +590,7 @@ async function submitJob(input: {
       });
     }
 
-    leaveOpenForHuman = !submission.submitted;
+    leaveOpenForHuman = !submission.submitted && input.holdForHuman !== false;
 
     return {
       ...submission,
@@ -841,6 +854,16 @@ export async function startWorkerServer() {
 
   const port = Number(process.env.LINKTIDE_WORKER_PORT ?? 4317);
   let busy = false;
+  // Last queue snapshot; the dashboard polls this while a batch is running.
+  let batchProgress = {
+    running: false,
+    total: 0,
+    completed: 0,
+    attempted: 0,
+    needsReview: 0,
+    failed: 0,
+    current: [] as string[]
+  };
 
   const server = createServer(async (req, res) => {
     const origin = req.headers.origin;
@@ -999,6 +1022,178 @@ export async function startWorkerServer() {
         masterKey: process.env.LINKTIDE_VAULT_KEY
       });
       send(res, 200, vault, origin);
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/submit/batch/progress") {
+      send(res, 200, batchProgress, origin);
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/submit/batch") {
+      const cors = allowedOrigin(origin);
+      if (!cors) {
+        send(res, 403, { error: "Origin is not allowed to use the local worker." });
+        return;
+      }
+
+      if (busy) {
+        send(res, 409, { error: "The LinkTide worker is already running a browser job." }, origin);
+        return;
+      }
+
+      busy = true;
+      try {
+        const body = await readJson(req);
+        if (!body.business?.name || !body.business?.website || !Array.isArray(body.items)) {
+          send(res, 400, { error: "business.name, business.website and items are required." }, origin);
+          return;
+        }
+        if (body.items.length > 150) {
+          send(res, 400, { error: "The maximum batch size is 150 opportunities." }, origin);
+          return;
+        }
+
+        // At most one attempt per directory domain, even when discovery
+        // returns multiple submission pages for that directory.
+        const seen = new Set<string>();
+        const items: Array<{ id: string; url: string; domain: string }> = [];
+        for (const candidate of body.items) {
+          if (!candidate || typeof candidate.url !== "string") continue;
+          try {
+            const url = new URL(candidate.url);
+            if (!["http:", "https:"].includes(url.protocol)) continue;
+            const domain = domainOf(url.toString());
+            if (seen.has(domain)) continue;
+            seen.add(domain);
+            items.push({
+              id: typeof candidate.id === "string" ? candidate.id : url.toString(),
+              url: url.toString(),
+              domain
+            });
+          } catch {
+            // Bad discovery URLs are ignored rather than sent to Chromium.
+          }
+        }
+
+        if (!items.length) {
+          send(res, 400, { error: "No valid unique HTTP(S) directory URLs supplied." }, origin);
+          return;
+        }
+
+        const existing = await listSubmissionHistory(historyPath());
+        const processed = new Set(
+          existing
+            .filter((record) =>
+              record.businessWebsite === body.business.website &&
+              ["pending", "verification_required", "live"].includes(record.status)
+            )
+            .map((record) => record.domain)
+        );
+
+        const skipped = items.filter((item) => processed.has(item.domain)).map((item) => ({
+          id: item.id,
+          url: item.url,
+          status: "skipped_existing",
+          submitted: false,
+          reasons: ["A prior submission for this business is pending, verified or live."]
+        }));
+        const remaining = items.filter((item) => !processed.has(item.domain));
+        const concurrency = Math.max(1, Math.min(4,
+          Number.isFinite(Number(body.concurrency)) ? Math.floor(Number(body.concurrency)) : 3
+        ));
+        const reports: Array<Record<string, unknown>> = new Array(remaining.length);
+        let nextIndex = 0;
+
+        batchProgress = {
+          running: true,
+          total: remaining.length,
+          completed: 0,
+          attempted: 0,
+          needsReview: 0,
+          failed: 0,
+          current: []
+        };
+
+        const lane = async () => {
+          while (true) {
+            const index = nextIndex++;
+            if (index >= remaining.length) return;
+            const item = remaining[index];
+            batchProgress.current.push(item.domain);
+            try {
+              // No auto-account creation in bulk: the credential vault and
+              // legal/verification checkpoints must be handled one by one.
+              // Pages needing review are closed to avoid dozens of idle tabs.
+              const result = await submitJob({
+                url: item.url,
+                business: body.business,
+                autoSubmit: body.autoSubmit === true,
+                autoCreateAccount: false,
+                holdForHuman: false
+              });
+              reports[index] = { id: item.id, url: item.url, ...result };
+              if (result.submitted) batchProgress.attempted++;
+              else batchProgress.needsReview++;
+            } catch (error) {
+              reports[index] = {
+                id: item.id,
+                url: item.url,
+                status: "failed",
+                submitted: false,
+                reasons: [error instanceof Error ? error.message : "Worker job failed."]
+              };
+              batchProgress.failed++;
+            } finally {
+              batchProgress.completed++;
+              batchProgress.current = batchProgress.current.filter((domain) => domain !== item.domain);
+            }
+          }
+        };
+
+        await Promise.all(
+          Array.from({ length: Math.min(concurrency, remaining.length) }, () => lane())
+        );
+
+        // Serialize history writes: its on-disk JSON file is not designed
+        // for concurrent read/modify/write operations.
+        const completed: Array<Record<string, unknown>> = [];
+        for (let index = 0; index < remaining.length; index++) {
+          const report = reports[index];
+          const item = remaining[index];
+          try {
+            const historyRecord = await recordSubmissionAttempt({
+              url: item.url,
+              business: body.business,
+              result: report
+            });
+            completed.push({ ...report, historyRecord });
+          } catch (error) {
+            completed.push({
+              ...report,
+              historyError: error instanceof Error ? error.message : "Could not save submission history."
+            });
+          }
+        }
+
+        send(res, 200, {
+          total: items.length,
+          processed: remaining.length,
+          skipped: skipped.length,
+          attempted: batchProgress.attempted,
+          needsReview: batchProgress.needsReview,
+          failed: batchProgress.failed,
+          results: [...skipped, ...completed]
+        }, origin);
+      } catch (error) {
+        send(res, 500, {
+          error: error instanceof Error ? error.message : "Batch processing failed."
+        }, origin);
+      } finally {
+        batchProgress.running = false;
+        batchProgress.current = [];
+        busy = false;
+      }
       return;
     }
 
