@@ -751,54 +751,75 @@ export function LinkTideDashboard() {
       return;
     }
 
+    saveProfile();
     setBatchRunning(true);
-    setBatchMessage(`Starting 0 / ${queued.length}`);
+    setBatchMessage("Preparing " + queued.length + " opportunities for parallel processing.");
     setError("");
+    let progressTimer: ReturnType<typeof setInterval> | undefined;
 
     try {
-      for (let index = 0; index < queued.length; index += 1) {
-        const item = queued[index];
-        setActiveAutomationId(item.id);
-        setBatchMessage(
-          `Processing ${index + 1} / ${queued.length}: ${item.domain}`
-        );
-
-        const response = await fetch(`${workerUrl}/submit`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            url: item.url,
-            business: workerBusiness(),
-            autoSubmit: true,
-            autoCreateAccount: true
-          })
-        });
-
-        const result = await response.json();
-        if (!response.ok) {
-          throw new Error(result.error ?? `Automation failed for ${item.domain}.`);
-        }
-
-        setAutomationResults((current) => ({
-          ...current,
-          [item.id]: result
-        }));
-
-        if (!result.submitted || result.browserLeftOpen) {
+      // Poll the local worker: individual directory tasks are independent,
+      // but slow forms may take minutes and the UI should remain informative.
+      progressTimer = setInterval(async () => {
+        try {
+          const response = await fetch(workerUrl + "/submit/batch/progress");
+          if (!response.ok) return;
+          const progress = await response.json();
+          if (!progress.running) return;
+          const active = (progress.current as string[]).slice(0, 3).join(", ");
           setBatchMessage(
-            `Paused at ${item.domain}. Complete the human step in the open browser, then run the queue again.`
+            "Completed " + progress.completed + " / " + progress.total +
+            " | attempted " + progress.attempted +
+            " | review " + progress.needsReview +
+            " | failed " + progress.failed +
+            (active ? " | working: " + active : "")
           );
-          return;
+        } catch {
+          // The terminal result still reports completion if polling fails.
         }
+      }, 1200);
+
+      const response = await fetch(workerUrl + "/submit/batch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          items: queued.map((item) => ({ id: item.id, url: item.url })),
+          business: workerBusiness(),
+          autoSubmit: true,
+          // Account creation, CAPTCHA, legal consent and payment require
+          // manual handling; bulk jobs do not bypass those checkpoints.
+          autoCreateAccount: false,
+          concurrency: 3
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error ?? "Parallel queue failed.");
       }
 
-      setBatchMessage(`Finished all ${queued.length} queued opportunities.`);
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Queue automation failed."
+      setAutomationResults((current) => {
+        const next = { ...current };
+        for (const item of result.results ?? []) {
+          next[item.id] = item;
+        }
+        return next;
+      });
+
+      await loadHistory();
+      setBatchMessage(
+        "Finished " + result.processed + " opportunities: " +
+        result.attempted + " attempted, " +
+        result.needsReview + " need review, " +
+        result.failed + " failed, " +
+        result.skipped + " previously submitted (skipped). " +
+        "An attempted submission is not a verified live backlink."
       );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Parallel queue failed.");
       setBatchMessage("Queue stopped because of an error.");
     } finally {
+      if (progressTimer !== undefined) clearInterval(progressTimer);
       setActiveAutomationId(null);
       setBatchRunning(false);
     }
@@ -1170,7 +1191,7 @@ export function LinkTideDashboard() {
                 onClick={processQueue}
                 disabled={batchRunning || activeAutomationId !== null || searchRun.queued === 0}
               >
-                {batchRunning ? "Running Queue..." : "Run Queue"}
+                {batchRunning ? "Running Parallel Queue..." : "Run Parallel Queue"}
               </button>
             </div>
           ) : null}
@@ -1221,7 +1242,7 @@ export function LinkTideDashboard() {
                         <button
                           className="secondary smallButton"
                           type="button"
-                          disabled={busy || activeAutomationId !== null}
+                          disabled={busy || batchRunning || activeAutomationId !== null}
                           onClick={() => runAutomation(item, "inspect")}
                         >
                           {busy ? "Working..." : "Inspect"}
@@ -1229,7 +1250,7 @@ export function LinkTideDashboard() {
                         <button
                           className="primary smallButton"
                           type="button"
-                          disabled={busy || activeAutomationId !== null || item.action === "skip"}
+                          disabled={busy || batchRunning || activeAutomationId !== null || item.action === "skip"}
                           onClick={() => runAutomation(item, "submit")}
                         >
                           {busy ? "Working..." : "Fill & Submit"}
