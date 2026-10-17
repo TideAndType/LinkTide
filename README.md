@@ -40,7 +40,15 @@ Because macOS requires a properly signed app for true in-place automatic updates
 - Creates directory accounts when appropriate and requested.
 - Stores generated directory passwords in a local AES-256-GCM encrypted vault.
 - Stops for CAPTCHA, payment, required legal consent, verification codes, or low-confidence form mappings.
-- Can process qualified opportunities sequentially with **Run Queue**.
+- Can process qualified opportunities concurrently with **Run Parallel Queue** (three browser tabs by default, up to four through the local batch API).
+- Shows per-directory submission attempts, attention states, verification, and existing-submission deduplication.
+- Keeps bulk account creation off and never bypasses CAPTCHA, payment, consent, or verification steps.
+
+### Parallel queue
+
+After a discovery search, review the qualified opportunities and select **Run Parallel Queue**. The local worker runs up to three eligible directories concurrently, while the dashboard reports progress. Directories with an existing pending, verification-required, or live listing are skipped for that business. A submitted form is recorded as an **attempt**, not proof that a backlink is live; use the history verification action to check the listing.
+
+The local worker provides `POST /submit/batch` and `GET /submit/batch/progress`. The batch endpoint accepts `{ "business": { ... }, "items": [{ "id": "...", "url": "https://..." }], "autoSubmit": true, "concurrency": 3 }`, capped at four concurrent tabs and 150 unique directories. For forms requiring accounts or human intervention, return to the individual directory action; the bulk queue closes review tabs instead of leaving dozens of browser windows open. Each batch is initiated explicitly from LinkTide, not scheduled to run unattended.
 - Learns successful directory mappings for future runs.
 
 ## Developer setup
