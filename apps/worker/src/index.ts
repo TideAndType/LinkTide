@@ -895,8 +895,22 @@ export async function startWorkerServer() {
     }
 
     if (req.method === "POST" && req.url === "/lm-studio/test") {
-      const result = await testLmStudioConnection();
-      send(res, result.status, result.body, origin);
+      try {
+        // Test the values currently on screen, even before Settings are saved.
+        // Old clients that send an empty request body still use saved settings.
+        const body = await readJson(req);
+        const result = await testLmStudioConnection({
+          baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
+          model: typeof body.model === "string" ? body.model : undefined,
+          apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined
+        });
+        send(res, result.status, result.body, origin);
+      } catch (error) {
+        send(res, 400, {
+          configured: false,
+          error: error instanceof Error ? error.message : "LM Studio connection test failed."
+        }, origin);
+      }
       return;
     }
 
