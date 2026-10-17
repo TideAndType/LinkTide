@@ -257,7 +257,7 @@ function normalizeCompatibleModels(payload: CompatibleModelsResponse): LoadedLmS
     .filter((model) =>
       typeof model.id === "string" &&
       model.id.trim() &&
-      !/embedding|text-embed|rerank/i.test(model.type ?? model.id)
+      !/embedding|text-embed|rerank/i.test(model.type ?? model.id ?? "")
     )
     .filter((model) => {
       const id = model.id as string;
