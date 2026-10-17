@@ -13,9 +13,13 @@ End users do **not** need Node.js, pnpm, Terminal, or a shell installer.
 
 On first launch LinkTide prepares its browser automation engine automatically. In **Settings**, add:
 
-- LM Studio tunnel URL
-- LM Studio model
-- LM Studio API key, if your tunnel requires one
+- LM Studio server URL (recommended on the same Mac: `http://127.0.0.1:1234/v1`, or your Cloudflare tunnel)
+- LM Studio model (refresh the model list, select your model, and save settings)
+- LM Studio API token, only if your server requires one
+
+Open LM Studio's **Developer** tab, start its local API server, and load a chat model before connecting. LinkTide first queries the OpenAI-compatible `/v1/models` endpoint, which also works through tunnels exposing only OpenAI-compatible paths. You can enter just the server origin or the full `/v1` URL; LinkTide normalizes both. **Test Connection** uses the values currently on screen even if you haven't saved them. After a successful test, click **Save Settings**.
+
+If the test reports **401/403**, check your token or Cloudflare Access restrictions. **404** usually means the URL points at the wrong server/path. If it times out, check that LM Studio's server is running and the model is loaded.
 - No search API key required: public search uses headless Chromium
 
 All application settings, encrypted directory credentials, learned recipes, and browser data are stored locally on the Mac.

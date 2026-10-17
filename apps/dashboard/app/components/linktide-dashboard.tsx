@@ -232,7 +232,7 @@ export function LinkTideDashboard() {
   const [loadedModels, setLoadedModels] = useState<LoadedLmStudioModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelMessage, setModelMessage] = useState(
-    "Enter your LM Studio tunnel to detect loaded models."
+    "Enter your LM Studio server URL to detect models."
   );
   const [workerState, setWorkerState] = useState<WorkerState>("checking");
   const [workerMessage, setWorkerMessage] = useState("Starting LinkTide service...");
@@ -278,7 +278,7 @@ export function LinkTideDashboard() {
 
     if (!baseUrl) {
       setLoadedModels([]);
-      setModelMessage("Enter your LM Studio tunnel to detect loaded models.");
+      setModelMessage("Enter your LM Studio server URL to detect models.");
       return;
     }
 
@@ -461,7 +461,7 @@ export function LinkTideDashboard() {
         ...current,
         lmStudioApiKey: ""
       }));
-      setSettingsMessage("Saved locally. Secret fields were cleared from the screen.");
+      setSettingsMessage("Saved locally. Test Connection now checks the values currently on screen.");
       await refreshLmStudioModels(result.lmStudioBaseUrl ?? "", "");
       await testWorker();
     } catch (caught) {
@@ -505,7 +505,7 @@ export function LinkTideDashboard() {
   ) {
     if (!baseUrl.trim()) {
       setLoadedModels([]);
-      setModelMessage("Enter your LM Studio tunnel to detect loaded models.");
+      setModelMessage("Enter your LM Studio server URL to detect models.");
       return;
     }
 
@@ -535,36 +535,21 @@ export function LinkTideDashboard() {
       setLoadedModels(models);
 
       if (!models.length) {
-        setModelMessage("No loaded LLMs detected. Load a model in LM Studio.");
+        setModelMessage("No chat models returned by LM Studio. Load a model and verify the server is running.");
         return;
       }
 
       setModelMessage(
-        `${models.length} loaded ${models.length === 1 ? "model" : "models"} detected.`
+        `${models.length} ${models.length === 1 ? "model" : "models"} available. Select one, then Save Settings.`
       );
 
-      setSettings((current) => {
-        const selected = models.some(
-          (model) => model.id === current.lmStudioModel
-        )
-          ? current.lmStudioModel
-          : models[0].id;
-
-        if (selected !== current.lmStudioModel) {
-          void fetch(`${workerUrl}/settings`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ lmStudioModel: selected })
-          }).then(async (saveResponse) => {
-            if (saveResponse.ok) {
-              const saved = (await saveResponse.json()) as PublicSettings;
-              setPublicSettings(saved);
-            }
-          });
-        }
-
-        return { ...current, lmStudioModel: selected };
-      });
+      // Never perform network writes inside a React state updater. Doing so
+      // could silently overwrite a freshly-entered model or URL with stale
+      // auto-detection results.
+      setSettings((current) => ({
+        ...current,
+        lmStudioModel: current.lmStudioModel || models[0].id
+      }));
     } catch (caught) {
       setLoadedModels([]);
       setModelMessage(
@@ -584,7 +569,13 @@ export function LinkTideDashboard() {
 
     try {
       const response = await fetch(`${workerUrl}/lm-studio/test`, {
-        method: "POST"
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: settings.lmStudioBaseUrl.trim(),
+          model: settings.lmStudioModel.trim(),
+          apiKey: settings.lmStudioApiKey.trim()
+        })
       });
       const result = await response.json();
 
@@ -596,7 +587,9 @@ export function LinkTideDashboard() {
 
       setLmStatus("connected");
       setLmMessage(
-        `Connected to ${result.model} via ${result.endpoint ?? "configured endpoint"}`
+        `Connected to ${result.model} via ${result.endpoint ?? "configured endpoint"}.` +
+        (result.warning ? ` ${result.warning}` : "") +
+        " Click Save Settings if you changed the connection."
       );
     } catch (caught) {
       setLmStatus("error");
@@ -999,12 +992,16 @@ export function LinkTideDashboard() {
 
             <div className="settingsFields">
               <label>
-                LM Studio tunnel
+                LM Studio server URL (local or Cloudflare tunnel)
                 <input
                   value={settings.lmStudioBaseUrl}
                   onChange={(e) => updateSetting("lmStudioBaseUrl", e.target.value)}
-                  placeholder="https://your-tunnel.example.com/v1"
+                  placeholder="http://127.0.0.1:1234/v1"
                 />
+                <small className="muted">
+                  On this Mac use http://127.0.0.1:1234/v1. For a tunnel, paste
+                  its HTTPS URL. LinkTide automatically handles the /v1 path.
+                </small>
               </label>
               <label>
                 LM Studio model
