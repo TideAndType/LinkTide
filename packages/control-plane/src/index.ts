@@ -7,7 +7,7 @@ import {
 } from "@linktide/classifier";
 import { generateDirectoryQueries } from "@linktide/discovery";
 import { createLmStudioClient } from "@linktide/lm-studio";
-import { searchBrave } from "@linktide/search";
+import { searchHeadlessChromium } from "@linktide/search";
 import { generateVaultKey } from "@linktide/vault";
 
 export type LinkTideSettings = {
@@ -15,7 +15,6 @@ export type LinkTideSettings = {
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   lmStudioApiKey: string;
-  braveSearchApiKey: string;
   vaultKey: string;
   searchMaxQueries: number;
   searchResultsPerQuery: number;
@@ -25,7 +24,6 @@ export type PublicSettings = {
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   hasLmStudioApiKey: boolean;
-  hasBraveSearchApiKey: boolean;
   searchMaxQueries: number;
   searchResultsPerQuery: number;
 };
@@ -67,7 +65,6 @@ function defaults(): LinkTideSettings {
     lmStudioBaseUrl: process.env.LM_STUDIO_BASE_URL ?? "",
     lmStudioModel: process.env.LM_STUDIO_MODEL ?? "",
     lmStudioApiKey: process.env.LM_STUDIO_API_KEY ?? "",
-    braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY ?? "",
     vaultKey: process.env.LINKTIDE_VAULT_KEY ?? generateVaultKey(),
     searchMaxQueries: Number(process.env.LINKTIDE_SEARCH_MAX_QUERIES ?? 8),
     searchResultsPerQuery: Number(
@@ -104,7 +101,6 @@ function publicSettings(settings: LinkTideSettings): PublicSettings {
     lmStudioBaseUrl: settings.lmStudioBaseUrl,
     lmStudioModel: settings.lmStudioModel,
     hasLmStudioApiKey: Boolean(settings.lmStudioApiKey),
-    hasBraveSearchApiKey: Boolean(settings.braveSearchApiKey),
     searchMaxQueries: settings.searchMaxQueries,
     searchResultsPerQuery: settings.searchResultsPerQuery
   };
@@ -114,7 +110,6 @@ export function applySettingsToEnv(settings: LinkTideSettings) {
   process.env.LM_STUDIO_BASE_URL = settings.lmStudioBaseUrl;
   process.env.LM_STUDIO_MODEL = settings.lmStudioModel;
   process.env.LM_STUDIO_API_KEY = settings.lmStudioApiKey;
-  process.env.BRAVE_SEARCH_API_KEY = settings.braveSearchApiKey;
   process.env.LINKTIDE_VAULT_KEY = settings.vaultKey;
   process.env.LINKTIDE_SEARCH_MAX_QUERIES = String(settings.searchMaxQueries);
   process.env.LINKTIDE_SEARCH_RESULTS_PER_QUERY = String(
@@ -129,12 +124,18 @@ export async function loadSettings(dataDirectory: string) {
     const raw = await readFile(settingsPath(dataDirectory), "utf8");
     const saved = JSON.parse(raw) as Partial<LinkTideSettings>;
 
+    // Preserve previous LM Studio settings and the vault key while dropping
+    // the legacy paid search credential from future saved settings.
     const settings: LinkTideSettings = {
       ...base,
-      ...saved,
-      version: 1,
+      lmStudioBaseUrl: typeof saved.lmStudioBaseUrl === "string"
+        ? saved.lmStudioBaseUrl : base.lmStudioBaseUrl,
+      lmStudioModel: typeof saved.lmStudioModel === "string"
+        ? saved.lmStudioModel : base.lmStudioModel,
+      lmStudioApiKey: typeof saved.lmStudioApiKey === "string"
+        ? saved.lmStudioApiKey : base.lmStudioApiKey,
       vaultKey: saved.vaultKey?.trim() || base.vaultKey,
-      searchMaxQueries: clampInt(saved.searchMaxQueries, 8, 1, 25),
+      searchMaxQueries: clampInt(saved.searchMaxQueries, 8, 1, 10),
       searchResultsPerQuery: clampInt(
         saved.searchResultsPerQuery,
         10,
@@ -178,7 +179,6 @@ export async function updateSettings(
     lmStudioBaseUrl: string;
     lmStudioModel: string;
     lmStudioApiKey: string;
-    braveSearchApiKey: string;
     searchMaxQueries: number;
     searchResultsPerQuery: number;
   }>
@@ -199,16 +199,11 @@ export async function updateSettings(
       typeof input.lmStudioApiKey === "string" && input.lmStudioApiKey.length
         ? input.lmStudioApiKey.trim()
         : current.lmStudioApiKey,
-    braveSearchApiKey:
-      typeof input.braveSearchApiKey === "string" &&
-      input.braveSearchApiKey.length
-        ? input.braveSearchApiKey.trim()
-        : current.braveSearchApiKey,
     searchMaxQueries: clampInt(
       input.searchMaxQueries,
       current.searchMaxQueries,
       1,
-      25
+      10
     ),
     searchResultsPerQuery: clampInt(
       input.searchResultsPerQuery,
@@ -565,17 +560,6 @@ function fallbackQualification(
 }
 
 export async function runDiscoverySearch(body: SearchRequest) {
-  const braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
-  if (!braveApiKey) {
-    return {
-      status: 400,
-      body: {
-        configured: false,
-        error: "Add your Brave Search API key in LinkTide Settings."
-      }
-    };
-  }
-
   const business = body.business;
   const name = business?.name?.trim();
   const website = business?.website?.trim();
@@ -584,7 +568,7 @@ export async function runDiscoverySearch(body: SearchRequest) {
   const locations = cleanList(business?.locations, 40);
   const queries = cleanList(
     body.queries,
-    clampInt(process.env.LINKTIDE_SEARCH_MAX_QUERIES, 8, 1, 25)
+    clampInt(process.env.LINKTIDE_SEARCH_MAX_QUERIES, 8, 1, 10)
   );
 
   if (!name || !website || !queries.length) {
@@ -603,25 +587,40 @@ export async function runDiscoverySearch(body: SearchRequest) {
     20
   );
 
-  const searchResults = (
-    await Promise.all(
-      queries.map((query) =>
-        searchBrave({
-          apiKey: braveApiKey,
-          query,
-          count: perQuery,
-          country: "US",
-          searchLang: "en"
-        })
-      )
-    )
-  ).flat();
+  let searchResults: Awaited<ReturnType<typeof searchHeadlessChromium>>;
+  try {
+    searchResults = await searchHeadlessChromium({
+      queries,
+      count: perQuery,
+      delayMs: clampInt(process.env.LINKTIDE_SEARCH_DELAY_MS, 2500, 1500, 10000)
+    });
+  } catch (error) {
+    return {
+      status: 502,
+      body: {
+        configured: true,
+        provider: "chromium",
+        error: error instanceof Error ? error.message : "Headless browser search failed."
+      }
+    };
+  }
+
+  if (!searchResults.results.length) {
+    return {
+      status: 422,
+      body: {
+        configured: true,
+        provider: "chromium",
+        error: "Public search returned no results. Try broader terms or fewer queries."
+      }
+    };
+  }
 
   const siteDomain = ownDomain(website);
   const seenDomains = new Set<string>();
   const candidates: OpportunityCandidate[] = [];
 
-  for (const result of searchResults) {
+  for (const result of searchResults.results) {
     if (!result.domain || result.domain === siteDomain) continue;
     if (seenDomains.has(result.domain)) continue;
     seenDomains.add(result.domain);
@@ -666,10 +665,10 @@ export async function runDiscoverySearch(body: SearchRequest) {
     status: 200,
     body: {
       configured: true,
-      provider: "brave",
+      provider: "chromium",
       aiUsed,
-      searchesRun: queries.length,
-      rawResults: searchResults.length,
+      searchesRun: searchResults.searchesRun,
+      rawResults: searchResults.results.length,
       uniqueDomains: candidates.length,
       queued: opportunities.filter((item) => item.action === "queue").length,
       review: opportunities.filter((item) => item.action === "review").length,
