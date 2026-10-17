@@ -66,7 +66,7 @@ To run the dashboard/worker during development, use the project scripts. These c
 
 ## macOS release
 
-Releases are created from **GitHub Actions → Release macOS App → Run workflow**. Enter a semantic version such as `0.1.0`.
+A version bump merged to `main` automatically triggers **GitHub Actions → Release macOS App**, builds a universal DMG, and publishes it to **GitHub Releases**. You can also use **Run workflow** manually and enter a semantic version.
 
 No Apple Developer secrets are required for the personal-use build. GitHub Actions builds an ad-hoc signed universal DMG and publishes it to a public GitHub Release. Installed LinkTide copies use that release to detect and download newer DMGs.
 
