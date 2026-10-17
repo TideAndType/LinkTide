@@ -1,6 +1,6 @@
 {
   "name": "linktide",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local-first backlink discovery, citation management, and guarded directory submission for macOS.",
   "author": {
     "name": "Tide & Type Co.",
@@ -13,6 +13,7 @@
     "worker": "pnpm --filter @linktide/worker serve",
     "worker:doctor": "pnpm --filter @linktide/worker doctor",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test",
     "build:dashboard": "pnpm --filter @linktide/dashboard build",
     "build:desktop": "pnpm build:dashboard && esbuild apps/desktop/src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/desktop/main.cjs --external:electron --external:playwright",
     "desktop:dev": "pnpm build:desktop && electron .",

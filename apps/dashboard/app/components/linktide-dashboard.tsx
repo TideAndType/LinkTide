@@ -30,14 +30,12 @@ type AppSettings = {
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   lmStudioApiKey: string;
-  braveSearchApiKey: string;
 };
 
 type PublicSettings = {
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   hasLmStudioApiKey: boolean;
-  hasBraveSearchApiKey: boolean;
   searchMaxQueries: number;
   searchResultsPerQuery: number;
 };
@@ -191,8 +189,7 @@ const emptyProfile: BusinessProfile = {
 const emptySettings: AppSettings = {
   lmStudioBaseUrl: "",
   lmStudioModel: "",
-  lmStudioApiKey: "",
-  braveSearchApiKey: ""
+  lmStudioApiKey: ""
 };
 
 function splitCsv(value: string) {
@@ -309,10 +306,10 @@ export function LinkTideDashboard() {
     [profile]
   );
 
+  // Directory discovery needs no paid API or AI connection.
+  // LM Studio is optional but improves opportunity qualification.
   const settingsReady = Boolean(
-    publicSettings?.lmStudioBaseUrl &&
-      publicSettings?.lmStudioModel &&
-      publicSettings?.hasBraveSearchApiKey
+    publicSettings?.lmStudioBaseUrl && publicSettings?.lmStudioModel
   );
 
   function update<K extends keyof BusinessProfile>(
@@ -432,9 +429,7 @@ export function LinkTideDashboard() {
         lmStudioModel: result.lmStudioModel ?? ""
       }));
       setSettingsMessage(
-        result.hasBraveSearchApiKey
-          ? "Settings saved on this Mac."
-          : "Add your LM Studio and Brave Search settings."
+        "Headless Chromium search is ready; no search API key is required."
       );
       void refreshLmStudioModels(result.lmStudioBaseUrl ?? "", "");
     } catch (caught) {
@@ -464,8 +459,7 @@ export function LinkTideDashboard() {
       setPublicSettings(result);
       setSettings((current) => ({
         ...current,
-        lmStudioApiKey: "",
-        braveSearchApiKey: ""
+        lmStudioApiKey: ""
       }));
       setSettingsMessage("Saved locally. Secret fields were cleared from the screen.");
       await refreshLmStudioModels(result.lmStudioBaseUrl ?? "", "");
@@ -882,8 +876,8 @@ export function LinkTideDashboard() {
         <div className="setupBanner">
           <strong>Finish LinkTide setup</strong>
           <span>
-            Add your LM Studio tunnel and Brave Search API key in Settings.
-            Loaded models will appear automatically in the model dropdown.
+            Headless Chromium discovery works without any search API key.
+            Connect LM Studio in Settings for AI-assisted directory qualification.
           </span>
         </div>
       ) : null}
@@ -1056,15 +1050,11 @@ export function LinkTideDashboard() {
                   placeholder={publicSettings?.hasLmStudioApiKey ? "Saved" : "Optional"}
                 />
               </label>
-              <label>
-                Brave Search API key
-                <input
-                  type="password"
-                  value={settings.braveSearchApiKey}
-                  onChange={(e) => updateSetting("braveSearchApiKey", e.target.value)}
-                  placeholder={publicSettings?.hasBraveSearchApiKey ? "Saved" : "Required for live search"}
-                />
-              </label>
+              <p className="muted tiny">
+                Search provider: Headless Chromium (free). Searches run on this
+                Mac with a delay between queries; no Brave Search key is needed.
+                If a search site blocks automation, LinkTide stops and reports it.
+              </p>
             </div>
 
             <button className="primary full" type="submit" disabled={savingSettings}>

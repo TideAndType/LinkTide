@@ -16,7 +16,7 @@ On first launch LinkTide prepares its browser automation engine automatically. I
 - LM Studio tunnel URL
 - LM Studio model
 - LM Studio API key, if your tunnel requires one
-- Brave Search API key
+- No search API key required: public search uses headless Chromium
 
 All application settings, encrypted directory credentials, learned recipes, and browser data are stored locally on the Mac.
 
@@ -31,7 +31,7 @@ Because macOS requires a properly signed app for true in-place automatic updates
 ## What LinkTide does
 
 - Builds niche and location-specific backlink discovery queries.
-- Searches the web through Brave Search.
+- Searches public directory results using headless Chromium (DuckDuckGo HTML), with serial queries and delays. No Brave Search subscription is required.
 - Uses your LM Studio model to qualify backlink/citation opportunities.
 - Deduplicates and ranks candidate domains.
 - Opens likely submission pages in Chromium.
@@ -43,14 +43,17 @@ Because macOS requires a properly signed app for true in-place automatic updates
 - Can process qualified opportunities concurrently with **Run Parallel Queue** (three browser tabs by default, up to four through the local batch API).
 - Shows per-directory submission attempts, attention states, verification, and existing-submission deduplication.
 - Keeps bulk account creation off and never bypasses CAPTCHA, payment, consent, or verification steps.
+- Learns successful directory mappings for future runs.
+
+### Free directory search
+
+Select **Search & Qualify** after building a discovery plan. LinkTide opens its own temporary headless Chromium session and reads public DuckDuckGo HTML search results, waiting at least 1.5 seconds between queries (2.5 seconds by default). No paid search API or Brave key is required. Searches may be limited, blocked, or require human verification: LinkTide does not bypass CAPTCHAs or other access restrictions and will show an error. The browser session closes after discovery; the separate Chromium submission browser remains available for form review. Connect LM Studio if you want AI-powered qualification, or LinkTide will mark results for manual review.
 
 ### Parallel queue
 
 After a discovery search, review the qualified opportunities and select **Run Parallel Queue**. The local worker runs up to three eligible directories concurrently, while the dashboard reports progress. Directories with an existing pending, verification-required, or live listing are skipped for that business. A submitted form is recorded as an **attempt**, not proof that a backlink is live; use the history verification action to check the listing.
 
 The local worker provides `POST /submit/batch` and `GET /submit/batch/progress`. The batch endpoint accepts `{ "business": { ... }, "items": [{ "id": "...", "url": "https://..." }], "autoSubmit": true, "concurrency": 3 }`, capped at four concurrent tabs and 150 unique directories. For forms requiring accounts or human intervention, return to the individual directory action; the bulk queue closes review tabs instead of leaving dozens of browser windows open. Each batch is initiated explicitly from LinkTide, not scheduled to run unattended.
-- Learns successful directory mappings for future runs.
-
 ## Developer setup
 
 The repository remains a pnpm monorepo for development:
