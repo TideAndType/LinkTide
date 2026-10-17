@@ -6,7 +6,7 @@ import {
   type QualifiedOpportunity
 } from "@linktide/classifier";
 import { generateDirectoryQueries } from "@linktide/discovery";
-import { createLmStudioClient } from "@linktide/lm-studio";
+import { createLmStudioClient, lmStudioEndpoint, openAiBaseUrl } from "@linktide/lm-studio";
 import { searchHeadlessChromium } from "@linktide/search";
 import { generateVaultKey } from "@linktide/vault";
 
@@ -236,87 +236,130 @@ type NativeLmStudioModelsResponse = {
   }>;
 };
 
+type CompatibleModelsResponse = {
+  data?: Array<{ id?: string; type?: string }>;
+};
+
 function nativeModelsUrl(baseUrl: string) {
-  const url = new URL(baseUrl);
-  let path = url.pathname.replace(/\/+$/, "");
-  path = path.replace(/\/v1$/i, "");
-  url.pathname = `${path}/api/v1/models`.replace(/\/{2,}/g, "/");
-  url.search = "";
-  url.hash = "";
-  return url.toString();
+  return openAiBaseUrl(baseUrl).replace(/\/v1$/i, "/api/v1/models");
 }
 
+function safeResponseDetail(raw: string) {
+  return /<!doctype|<html|<head|<body/i.test(raw)
+    ? "HTML response received; check Cloudflare tunnel access or proxy routing."
+    : raw.replace(/[\r\n\t]+/g, " ").slice(0, 180);
+}
+
+function normalizeCompatibleModels(payload: CompatibleModelsResponse): LoadedLmStudioModel[] {
+  const models = Array.isArray(payload.data) ? payload.data : [];
+  const seen = new Set<string>();
+  return models
+    .filter((model) =>
+      typeof model.id === "string" &&
+      model.id.trim() &&
+      !/embedding|text-embed|rerank/i.test(model.type ?? model.id)
+    )
+    .filter((model) => {
+      const id = model.id as string;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .map((model) => ({
+      id: model.id as string,
+      label: model.id as string,
+      // The compatible API exposes available models, not loaded-instance counts.
+      loadedInstances: 0
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function normalizeNativeModels(payload: NativeLmStudioModelsResponse): LoadedLmStudioModel[] {
+  return (Array.isArray(payload.models) ? payload.models : [])
+    .filter((model) =>
+      model.type === "llm" &&
+      typeof model.key === "string" &&
+      model.key.trim()
+    )
+    .map((model) => ({
+      id: model.key as string,
+      label: model.display_name?.trim() || (model.key as string),
+      loadedInstances: Array.isArray(model.loaded_instances) ? model.loaded_instances.length : 0
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Prefer OpenAI-compatible discovery, which Cloudflare tunnels commonly expose. */
 export async function listLoadedLmStudioModels(input?: {
   baseUrl?: string;
   apiKey?: string;
 }) {
-  const baseUrl =
-    input?.baseUrl?.trim() ||
-    process.env.LM_STUDIO_BASE_URL?.trim() ||
-    "";
-
+  const baseUrl = input?.baseUrl?.trim() || process.env.LM_STUDIO_BASE_URL?.trim() || "";
   if (!baseUrl) {
     return {
       status: 400,
       body: {
         configured: false,
         models: [] as LoadedLmStudioModel[],
-        error: "Add your LM Studio tunnel URL first."
+        error: "Enter the LM Studio server URL, e.g. http://127.0.0.1:1234/v1."
       }
     };
   }
 
-  const apiKey =
-    input?.apiKey?.trim() ||
-    process.env.LM_STUDIO_API_KEY?.trim() ||
-    "";
+  const apiKey = input?.apiKey?.trim() || process.env.LM_STUDIO_API_KEY?.trim() || "";
+  const headers = {
+    accept: "application/json",
+    ...(apiKey ? { authorization: "Bearer " + apiKey } : {})
+  };
 
   try {
-    const response = await fetch(nativeModelsUrl(baseUrl), {
-      headers: {
-        accept: "application/json",
-        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {})
-      }
+    const compatibleUrl = lmStudioEndpoint(baseUrl, "models");
+    const response = await fetch(compatibleUrl, {
+      headers,
+      signal: AbortSignal.timeout(15_000)
     });
+    if (response.ok) {
+      let payload: CompatibleModelsResponse;
+      try {
+        payload = await response.json() as CompatibleModelsResponse;
+      } catch {
+        throw new Error("LM Studio /v1/models returned invalid JSON; the tunnel may serve an HTML page.");
+      }
+      const models = normalizeCompatibleModels(payload);
+      return { status: 200, body: { configured: true, models, count: models.length, source: "openai-compatible" } };
+    }
 
-    if (!response.ok) {
-      const detail = await response.text();
+    // Older/mixed configurations may expose only the native LM Studio API.
+    if (response.status === 404) {
+      const native = await fetch(nativeModelsUrl(baseUrl), {
+        headers, signal: AbortSignal.timeout(15_000)
+      });
+      if (native.ok) {
+        const payload = await native.json() as NativeLmStudioModelsResponse;
+        const models = normalizeNativeModels(payload);
+        return { status: 200, body: { configured: true, models, count: models.length, source: "native" } };
+      }
       return {
         status: 502,
         body: {
           configured: true,
           models: [] as LoadedLmStudioModel[],
-          error: `LM Studio model discovery failed: ${response.status} ${detail.slice(0, 180)}`
+          error: "Neither /v1/models nor /api/v1/models is reachable (HTTP " + native.status +
+            "). Confirm the LM Studio server URL and tunnel routing."
         }
       };
     }
 
-    const payload = (await response.json()) as NativeLmStudioModelsResponse;
-    const models = (payload.models ?? [])
-      .filter(
-        (model) =>
-          model.type === "llm" &&
-          Array.isArray(model.loaded_instances) &&
-          model.loaded_instances.length > 0 &&
-          typeof model.key === "string" &&
-          model.key.trim()
-      )
-      .map((model) => ({
-        id: model.key as string,
-        label:
-          typeof model.display_name === "string" && model.display_name.trim()
-            ? model.display_name
-            : (model.key as string),
-        loadedInstances: model.loaded_instances?.length ?? 0
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-
+    const detail = safeResponseDetail(await response.text());
+    const hint = response.status === 401 || response.status === 403
+      ? " Check the LM Studio API token or Cloudflare Access protection."
+      : "";
     return {
-      status: 200,
+      status: 502,
       body: {
         configured: true,
-        models,
-        count: models.length
+        models: [] as LoadedLmStudioModel[],
+        error: "LM Studio model detection returned HTTP " + response.status + ": " + detail + hint
       }
     };
   } catch (error) {
@@ -325,66 +368,49 @@ export async function listLoadedLmStudioModels(input?: {
       body: {
         configured: true,
         models: [] as LoadedLmStudioModel[],
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not reach LM Studio model discovery."
+        error: "Could not reach LM Studio: " + (error instanceof Error ? error.message : "Network error") +
+          ". Verify the Developer API server is running and the URL is reachable."
       }
     };
   }
 }
 
-function lmClient() {
-  const baseUrl = process.env.LM_STUDIO_BASE_URL;
-  const model = process.env.LM_STUDIO_MODEL;
+function lmClient(input?: { baseUrl?: string; model?: string; apiKey?: string }) {
+  const baseUrl = input?.baseUrl?.trim() || process.env.LM_STUDIO_BASE_URL?.trim();
+  const model = input?.model?.trim() || process.env.LM_STUDIO_MODEL?.trim();
   if (!baseUrl || !model) return undefined;
 
   return createLmStudioClient({
     baseUrl,
     model,
-    apiKey: process.env.LM_STUDIO_API_KEY
+    apiKey: input?.apiKey?.trim() || process.env.LM_STUDIO_API_KEY
   });
 }
 
-export async function testLmStudioConnection() {
-  const client = lmClient();
-  const model = process.env.LM_STUDIO_MODEL;
-
-  if (!client || !model) {
+export async function testLmStudioConnection(input?: {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+}) {
+  const baseUrl = input?.baseUrl?.trim() || process.env.LM_STUDIO_BASE_URL?.trim() || "";
+  const model = input?.model?.trim() || process.env.LM_STUDIO_MODEL?.trim() || "";
+  if (!baseUrl || !model) {
     return {
       status: 400,
       body: {
         configured: false,
-        error: "Add your LM Studio tunnel URL and model in LinkTide Settings."
+        error: "Enter your LM Studio URL and select a model before testing."
       }
     };
   }
 
   try {
+    const client = lmClient(input);
+    if (!client) throw new Error("An LM Studio URL and model are required.");
     const response = await client.chat([
-      {
-        role: "system",
-        content: "Reply with exactly LINKTIDE_OK and nothing else."
-      },
+      { role: "system", content: "Reply with exactly LINKTIDE_OK and nothing else." },
       { role: "user", content: "LinkTide connection test." }
     ]);
-
-    if (!response.includes("LINKTIDE_OK")) {
-      return {
-        status: 502,
-        body: {
-          configured: true,
-          error: `LM Studio responded unexpectedly: ${response.slice(0, 160)}`
-        }
-      };
-    }
-
-    let endpoint = "configured endpoint";
-    try {
-      endpoint = new URL(process.env.LM_STUDIO_BASE_URL ?? "").host;
-    } catch {
-      // Keep safe label.
-    }
 
     return {
       status: 200,
@@ -392,7 +418,12 @@ export async function testLmStudioConnection() {
         configured: true,
         connected: true,
         model,
-        endpoint
+        endpoint: new URL(openAiBaseUrl(baseUrl)).host,
+        // A model response proves the connection even if the model ignores
+        // the precise probe instruction. It should be a warning, not a failure.
+        warning: response.includes("LINKTIDE_OK")
+          ? undefined
+          : "Connected and received model output, but the model did not return the exact test phrase."
       }
     };
   } catch (error) {
@@ -400,8 +431,7 @@ export async function testLmStudioConnection() {
       status: 502,
       body: {
         configured: true,
-        error:
-          error instanceof Error ? error.message : "LM Studio request failed."
+        error: error instanceof Error ? error.message : "LM Studio request failed."
       }
     };
   }
