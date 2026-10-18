@@ -8,6 +8,7 @@ import {
 import {
   inspectOpportunity,
   launchAutomationBrowser,
+  pickSubmissionForm,
   type FormFieldDescriptor,
   type OpportunityInspection
 } from "@linktide/browser";
@@ -205,9 +206,7 @@ async function openOpportunity(
 }
 
 function pickForm(inspection: OpportunityInspection) {
-  return inspection.forms
-    .slice()
-    .sort((a, b) => b.fields.length - a.fields.length)[0];
+  return pickSubmissionForm(inspection);
 }
 
 async function maybeSaveRecipe(input: {
@@ -280,7 +279,7 @@ async function inspectJob(input: {
           requiredUnmapped: []
         },
         canPrepareSubmission: false,
-        message: "No usable submission form was found."
+        message: "No business listing form found after checking up to three directory pages. Use the open browser to locate the claim/add-listing flow manually."
       };
     }
 
@@ -531,7 +530,7 @@ async function submitJob(input: {
         browserLeftOpen: leaveOpenForHuman,
         inspection,
         account,
-        reasons: ["No usable submission form was found."]
+        reasons: ["No business listing form found after checking directory navigation. The page may require sign-in, business lookup, or manual navigation."]
       };
     }
 
@@ -568,6 +567,21 @@ async function submitJob(input: {
       requestedAutoSubmit:
         input.autoSubmit ?? envBoolean(process.env.LINKTIDE_AUTO_SUBMIT, false)
     });
+
+    // Never submit when nothing was actually filled. Many directory sites
+    // show an unrelated search/login form on their landing page.
+    if (fillResult.filled.length === 0) {
+      decision.canAutoSubmit = false;
+      decision.reasons.push(
+        "No business-profile fields could be filled; review the page and profile."
+      );
+    }
+    if (fillResult.skipped.length > 0 && fillResult.filled.length < 2) {
+      decision.canAutoSubmit = false;
+      decision.reasons.push(
+        "Too few business-profile fields were filled to safely submit."
+      );
+    }
 
     const submission = await submitGuarded({
       page,

@@ -235,83 +235,115 @@ export async function collectForms(page: Page): Promise<FormDescriptor[]> {
   return forms;
 }
 
-export async function findSubmissionLink(
-  page: Page
-): Promise<SubmissionLinkCandidate | undefined> {
-  const current = new URL(page.url());
 
-  const candidates = await page.locator("a[href]").evaluateAll((anchors) =>
-    anchors.slice(0, 300).map((anchor) => {
-      const el = anchor as HTMLAnchorElement;
-      return {
-        text: (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 180),
-        href: el.href
-      };
-    })
-  );
-
-  const positive = [
-    ["add business", 12],
-    ["add your business", 14],
-    ["submit listing", 14],
-    ["submit business", 14],
-    ["list your business", 14],
-    ["get listed", 12],
-    ["add listing", 12],
-    ["claim listing", 10],
-    ["create listing", 10],
-    ["add company", 10],
-    ["submit company", 10],
-    ["join directory", 9],
-    ["business signup", 8],
-    ["register business", 8],
-    ["become a member", 6],
-    ["membership", 4]
-  ] as const;
-
-  const negative = [
-    "privacy",
-    "terms",
-    "blog",
-    "news",
-    "press",
-    "careers",
-    "login",
-    "sign in",
-    "forgot",
-    "advertise"
+/**
+ * Only consider links within the current directory's site. Organic search
+ * result URLs and advertisements must not be treated as submit endpoints.
+ */
+export function rankSubmissionLinks(
+  currentUrl: string,
+  candidates: Array<{ text: string; href: string }>
+): SubmissionLinkCandidate[] {
+  const current = new URL(currentUrl);
+  const host = current.hostname.toLowerCase().replace(/^www\./, "");
+  const positive: Array<[RegExp, number]> = [
+    [/(add|submit|create|post|publish)\s+(your\s+|a\s+|new\s+)?(business|company|listing|profile)/i, 22],
+    [/(claim|manage|verify)\s+(your\s+|a\s+|this\s+)?(business|listing|profile)/i, 19],
+    [/(list your business|get listed|free business listing|business registration)/i, 18],
+    [/(add-business|add-listing|submit-business|submit-listing|claim-listing|claim-business|create-listing)/i, 18],
+    [/(add|submit|claim|create|list).*(business|listing|company)/i, 12],
+    [/(business center|for business|business owners)/i, 5]
   ];
+  const negative = /(advertis|blog|news|careers|privacy|terms|press|affiliate|login|log in|sign in|password|checkout|pricing|payment|subscribe|contact us|search results)/i;
+  const ranked: SubmissionLinkCandidate[] = [];
 
-  const scored = candidates
-    .map((candidate) => {
-      try {
-        const url = new URL(candidate.href);
-        if (!["http:", "https:"].includes(url.protocol)) return null;
-
-        const haystack = `${candidate.text} ${url.pathname} ${url.search}`.toLowerCase();
-        let score = url.hostname === current.hostname ? 2 : 0;
-
-        for (const [term, weight] of positive) {
-          if (haystack.includes(term)) score += weight;
-        }
-
-        for (const term of negative) {
-          if (haystack.includes(term)) score -= 8;
-        }
-
-        return {
-          text: candidate.text || url.pathname,
-          url: url.toString(),
-          score
-        };
-      } catch {
-        return null;
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate.href, current);
+      if (!["http:", "https:"].includes(url.protocol) || url.username ||
+          url.password || url.port && url.port !== current.port) continue;
+      const candidateHost = url.hostname.toLowerCase().replace(/^www\./, "");
+      const sameSite =
+        candidateHost === host || candidateHost.endsWith("." + host) ||
+        host.endsWith("." + candidateHost);
+      if (!sameSite) continue;
+      if (url.toString() === current.toString()) continue;
+      if (url.hash && url.pathname === current.pathname && url.search === current.search) continue;
+      const haystack = [candidate.text, url.pathname.replace(/[-_]/g, " "), url.search]
+        .join(" ").toLowerCase();
+      let score = 0;
+      for (const [pattern, points] of positive) {
+        if (pattern.test(haystack)) score += points;
       }
-    })
-    .filter((candidate): candidate is SubmissionLinkCandidate => Boolean(candidate))
-    .sort((a, b) => b.score - a.score);
+      if (negative.test(haystack)) score -= 30;
+      if (score < 10) continue;
+      ranked.push({
+        text: candidate.text || url.pathname,
+        url: url.toString(),
+        score
+      });
+    } catch {
+      // Ignore malformed site navigation.
+    }
+  }
+  return ranked.sort((a, b) => b.score - a.score);
+}
 
-  return scored[0]?.score >= 6 ? scored[0] : undefined;
+export async function findSubmissionLink(
+  page: Page,
+  visited: ReadonlySet<string> = new Set()
+): Promise<SubmissionLinkCandidate | undefined> {
+  const anchors = await page.locator('a[href], button[data-href], button[data-url]')
+    .evaluateAll((nodes) => nodes.slice(0, 650).map((node) => {
+      const el = node as HTMLElement;
+      const link = el as HTMLAnchorElement;
+      return {
+        text: [
+          el.innerText || el.textContent || "",
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || ""
+        ].join(" ").replace(/\s+/g, " ").trim().slice(0, 220),
+        href: link.href || el.getAttribute("data-href") ||
+          el.getAttribute("data-url") || ""
+      };
+    }));
+  return rankSubmissionLinks(page.url(), anchors)
+    .find((candidate) => !visited.has(candidate.url));
+}
+
+/** Prefer genuine business-listing forms over header search, signup or newsletter forms. */
+export function scoreSubmissionForm(form: FormDescriptor, pageUrl: string): number {
+  const meta = (form.action + " " + pageUrl).toLowerCase();
+  const inputs = form.fields.map((field) =>
+    [field.name, field.id, field.label, field.placeholder].join(" ")
+      .toLowerCase().replace(/[_-]/g, " ")
+  );
+  const all = inputs.join(" | ");
+  let score = 0;
+  if (/(add|submit|create|claim|edit|register|post|publish).{0,18}(listing|business|company|profile)/.test(meta)) {
+    score += 5;
+  }
+  if (/search|query|newsletter|subscribe|log.?in|sign.?in|forgot.password/.test(meta)) score -= 12;
+  if (/(business|company|organization|listing)\s*(name|title)|^name\s*$/.test(all)) score += 6;
+  if (/(website|web site|site url|homepage|company url)/.test(all)) score += 5;
+  if (/(phone|telephone|mobile)/.test(all)) score += 3;
+  if (/(address|street|postal|zip|city|state|country)/.test(all)) score += 5;
+  if (/(category|industry|business type|company type)/.test(all)) score += 4;
+  if (/(description|about company|about business|services|specialties)/.test(all)) score += 4;
+  if (/e.?mail/.test(all)) score += 1;
+  if (/(search|query|newsletter|subscribe)/.test(all)) score -= 12;
+  if (/(password|sign.?in|log.?in|username|confirm password)/.test(all) ||
+      form.fields.some((field) => field.type === "password")) score -= 20;
+  if (form.fields.length < 2) score -= 5;
+  return score;
+}
+
+export function pickSubmissionForm(inspection: OpportunityInspection): FormDescriptor | undefined {
+  const ranked = inspection.forms.map((form) => ({
+    form,
+    score: scoreSubmissionForm(form, inspection.submissionPageUrl)
+  })).sort((a, b) => b.score - a.score || b.form.fields.length - a.form.fields.length);
+  return ranked[0]?.score >= 7 ? ranked[0].form : undefined;
 }
 
 export async function findAccountCreationLink(
@@ -384,49 +416,79 @@ export async function findAccountCreationLink(
   return scored[0]?.score >= 8 ? scored[0] : undefined;
 }
 
+
 export async function inspectOpportunity(
   context: BrowserContext,
   requestedUrl: string
 ): Promise<{ page: Page; inspection: OpportunityInspection }> {
   const page = await context.newPage();
   const safeUrl = ensureHttpUrl(requestedUrl);
-
-  await page.goto(safeUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: 35_000
-  });
-
-  let forms = await collectForms(page);
+  const initialDomain = new URL(safeUrl).hostname.toLowerCase().replace(/^www\./, "");
+  const visited = new Set<string>();
+  const path: string[] = [];
   let submissionLink: SubmissionLinkCandidate | undefined;
 
-  const usableFields = forms.reduce((sum, form) => sum + form.fields.length, 0);
-
-  if (usableFields < 2) {
-    submissionLink = await findSubmissionLink(page);
-
-    if (submissionLink) {
-      await page.goto(submissionLink.url, {
+  try {
+    // Follow at most three directory-owned pages: site home -> get listed ->
+    // add/claim listing. Do not follow unrelated external domains.
+    let target = safeUrl;
+    let forms: FormDescriptor[] = [];
+    for (let depth = 0; depth < 3; depth++) {
+      const response = await page.goto(target, {
         waitUntil: "domcontentloaded",
         timeout: 35_000
       });
+      if (response && [403, 429].includes(response.status())) {
+        throw new Error("Directory refused access (HTTP " + response.status() + ").");
+      }
+      const finalUrl = page.url();
+      const currentHost = new URL(finalUrl).hostname.toLowerCase().replace(/^www\./, "");
+      if (currentHost !== initialDomain &&
+          !currentHost.endsWith("." + initialDomain) &&
+          !initialDomain.endsWith("." + currentHost)) {
+        throw new Error("Directory redirected outside its site. Manual inspection required.");
+      }
+
+      visited.add(finalUrl);
+      path.push(finalUrl);
+      // Some JS-driven sites render the navigation and forms after DOMContentLoaded.
+      await page.locator("body").waitFor({ state: "attached", timeout: 8000 });
+      await page.waitForTimeout(500);
       forms = await collectForms(page);
+      const inspection: OpportunityInspection = {
+        requestedUrl: safeUrl,
+        finalUrl,
+        title: await page.title(),
+        submissionPageUrl: finalUrl,
+        submissionLink,
+        forms,
+        checkpoints: await detectHumanCheckpoints(page)
+      };
+      if (inspection.checkpoints.includes("captcha") ||
+          pickSubmissionForm(inspection) || depth === 2) break;
+
+      const next = await findSubmissionLink(page, visited);
+      if (!next) break;
+      submissionLink = next;
+      target = next.url;
+      visited.add(target);
     }
+    return {
+      page,
+      inspection: {
+        requestedUrl: safeUrl,
+        finalUrl: page.url(),
+        title: await page.title(),
+        submissionPageUrl: page.url(),
+        submissionLink,
+        forms,
+        checkpoints: await detectHumanCheckpoints(page)
+      }
+    };
+  } catch (error) {
+    await page.close().catch(() => undefined);
+    throw error;
   }
-
-  const checkpoints = await detectHumanCheckpoints(page);
-
-  return {
-    page,
-    inspection: {
-      requestedUrl: safeUrl,
-      finalUrl: page.url(),
-      title: await page.title(),
-      submissionPageUrl: page.url(),
-      submissionLink,
-      forms,
-      checkpoints
-    }
-  };
 }
 
 export function fieldLocator(page: Page, field: FormFieldDescriptor) {

@@ -711,6 +711,21 @@ export function LinkTideDashboard() {
         "linktide.opportunityQueue",
         JSON.stringify(nextRun)
       );
+
+      if (source === "google-form" && result.provider === "google-form") {
+        const eligible = (result.opportunities as QualifiedOpportunity[])
+          .find((item) => item.action === "queue") ??
+          (result.opportunities as QualifiedOpportunity[])
+          .find((item) => item.action === "review");
+        if (eligible) {
+          setBatchMessage("Google search found directory candidates. Opening " +
+            eligible.domain + " to locate and prefill its listing form for review.");
+          await runAutomation(eligible, "prepare");
+        } else {
+          setBatchMessage("No eligible directory candidate found in this search. " +
+            "Choose another query or paste a directory URL.");
+        }
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Live discovery failed.");
     } finally {
@@ -720,7 +735,7 @@ export function LinkTideDashboard() {
 
   async function runAutomation(
     item: QualifiedOpportunity,
-    mode: "inspect" | "submit"
+    mode: "inspect" | "prepare" | "submit"
   ) {
     saveProfile();
     setActiveAutomationId(item.id);
@@ -753,6 +768,13 @@ export function LinkTideDashboard() {
 
       if (mode === "submit") {
         await loadHistory();
+      } else if (mode === "prepare") {
+        setBatchMessage(result.fillResult
+          ? "Opened " + item.domain + ": filled " +
+            result.fillResult.filled.length + " business fields. " +
+            "Review the open browser before submitting."
+          : "Opened " + item.domain + " but no business form was filled. " +
+            (result.reasons?.join(" ") ?? "Review the open browser for account or claim steps."));
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Automation job failed.");
@@ -1207,14 +1229,15 @@ export function LinkTideDashboard() {
                   ))}
                 </select>
                 <small className="muted">
-                  Opens visible Chromium, fills Google's search field and presses Enter.
-                  Google may restrict automation or ask for verification. LinkTide does
-                  not bypass those restrictions. Repeat with another query to add results.
+                  Searches Google, then opens the first qualified directory site,
+                  follows Add Business / Claim Listing links and fills safe fields.
+                  You review before submission. Login, payment, consent and
+                  verification still require your help.
                 </small>
               </label>
               <button className="secondary" onClick={() => void searchAndQualify("google-form")} type="button"
                 disabled={searching || Boolean(manualDirectoryUrls.trim())}>
-                Search Google in Visible Browser
+                Search Google & Prepare First Listing
               </button>
               <button className="secondary" onClick={() => void searchAndQualify("chromium")} type="button"
                 disabled={searching || Boolean(manualDirectoryUrls.trim())}>
@@ -1245,6 +1268,17 @@ export function LinkTideDashboard() {
               <span className={searchRun.aiUsed ? "status good" : "status"}>
                 {searchRun.aiUsed ? "LM Studio qualified" : "Fallback review"}
               </span>
+              <button
+                className="secondary smallButton"
+                type="button"
+                onClick={() => {
+                  const first = searchRun.opportunities.find((item) => item.action === "queue") ??
+                    searchRun.opportunities.find((item) => item.action === "review");
+                  if (first) void runAutomation(first, "prepare");
+                }}
+                disabled={batchRunning || activeAutomationId !== null ||
+                  !searchRun.opportunities.some((item) => item.action !== "skip")}
+              >Find & Fill First Listing</button>
               <button
                 className="primary smallButton"
                 type="button"
@@ -1315,6 +1349,14 @@ export function LinkTideDashboard() {
                           onClick={() => runAutomation(item, "inspect")}
                         >
                           {busy ? "Working..." : "Inspect"}
+                        </button>
+                        <button
+                          className="secondary smallButton"
+                          type="button"
+                          disabled={busy || batchRunning || activeAutomationId !== null || item.action === "skip"}
+                          onClick={() => runAutomation(item, "prepare")}
+                        >
+                          {busy ? "Working..." : "Find & Fill Form"}
                         </button>
                         <button
                           className="primary smallButton"
