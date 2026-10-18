@@ -7,7 +7,7 @@ import {
 } from "@linktide/classifier";
 import { generateDirectoryQueries } from "@linktide/discovery";
 import { createLmStudioClient, lmStudioEndpoint, openAiBaseUrl } from "@linktide/lm-studio";
-import { searchHeadlessChromium } from "@linktide/search";
+import { directoryCatalogResults, importedDirectoryResults, searchHeadlessChromium, type SearchResult } from "@linktide/search";
 import { generateVaultKey } from "@linktide/vault";
 
 export type LinkTideSettings = {
@@ -48,6 +48,8 @@ export type SearchRequest = {
     locations?: string[];
   };
   queries?: string[];
+  source?: "catalog" | "chromium";
+  manualUrls?: string[];
 };
 
 const fallbackDirectoryTypes = [
@@ -601,49 +603,78 @@ export async function runDiscoverySearch(body: SearchRequest) {
     clampInt(process.env.LINKTIDE_SEARCH_MAX_QUERIES, 8, 1, 10)
   );
 
-  if (!name || !website || !queries.length) {
+  if (!name || !website) {
     return {
       status: 400,
-      body: {
-        error: "Business name, website, and at least one search query are required."
-      }
+      body: { error: "Business name and website are required." }
     };
   }
 
   const perQuery = clampInt(
-    process.env.LINKTIDE_SEARCH_RESULTS_PER_QUERY,
-    10,
-    1,
-    20
+    process.env.LINKTIDE_SEARCH_RESULTS_PER_QUERY, 10, 1, 20
   );
+  const manualUrls = Array.isArray(body.manualUrls)
+    ? body.manualUrls.filter((url): url is string => typeof url === "string")
+        .map((url) => url.trim()).filter(Boolean).slice(0, 100)
+    : [];
 
-  let searchResults: Awaited<ReturnType<typeof searchHeadlessChromium>>;
-  try {
-    searchResults = await searchHeadlessChromium({
-      queries,
-      count: perQuery,
-      delayMs: clampInt(process.env.LINKTIDE_SEARCH_DELAY_MS, 2500, 1500, 10000)
-    });
-  } catch (error) {
-    return {
-      status: 502,
-      body: {
-        configured: true,
-        provider: "chromium",
-        error: error instanceof Error ? error.message : "Headless browser search failed."
-      }
-    };
-  }
+  let provider: "catalog" | "chromium" | "manual" = "catalog";
+  let warning: string | undefined;
+  let searchResults: { results: SearchResult[]; searchesRun: number };
 
-  if (!searchResults.results.length) {
-    return {
-      status: 422,
-      body: {
-        configured: true,
-        provider: "chromium",
-        error: "Public search returned no results. Try broader terms or fewer queries."
+  if (manualUrls.length) {
+    const results = importedDirectoryResults(manualUrls);
+    if (!results.length) {
+      return { status: 400, body: {
+        error: "No valid public HTTP(S) directory URLs were supplied."
+      } };
+    }
+    provider = "manual";
+    searchResults = { results, searchesRun: 0 };
+  } else if (body.source === "chromium" && queries.length) {
+    try {
+      searchResults = await searchHeadlessChromium({
+        queries,
+        count: perQuery,
+        delayMs: clampInt(process.env.LINKTIDE_SEARCH_DELAY_MS, 2500, 1500, 10000)
+      });
+      provider = "chromium";
+      if (!searchResults.results.length) {
+        warning = "Public search returned no directory results. " +
+          "Using the built-in directory starter list instead.";
+        searchResults = {
+          results: directoryCatalogResults({
+            primaryCategory: business?.primaryCategory, niches, services
+          }),
+          searchesRun: searchResults.searchesRun
+        };
+        provider = "catalog";
       }
+    } catch (error) {
+      // A 403/429 or CAPTCHA is an access decision by the provider.
+      // Respect it: do not retry with proxies/stealth or another endpoint.
+      warning = "Public web search was unavailable (" +
+        (error instanceof Error ? error.message : "unknown error") +
+        "). Using LinkTide's built-in directory starter list instead. " +
+        "This list is not a live search; review eligibility before submitting.";
+      provider = "catalog";
+      searchResults = {
+        results: directoryCatalogResults({
+          primaryCategory: business?.primaryCategory, niches, services
+        }),
+        searchesRun: 0
+      };
+    }
+  } else {
+    searchResults = {
+      results: directoryCatalogResults({
+        primaryCategory: business?.primaryCategory, niches, services
+      }),
+      searchesRun: 0
     };
+    provider = "catalog";
+    warning = "Showing known directory starter sites, not results from a live search. " +
+      "Use your own URLs to add more opportunities.";
   }
 
   const siteDomain = ownDomain(website);
@@ -695,7 +726,8 @@ export async function runDiscoverySearch(body: SearchRequest) {
     status: 200,
     body: {
       configured: true,
-      provider: "chromium",
+      provider,
+      warning,
       aiUsed,
       searchesRun: searchResults.searchesRun,
       rawResults: searchResults.results.length,
