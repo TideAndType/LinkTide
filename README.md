@@ -59,6 +59,10 @@ To provide additional directory sites, paste one public HTTP(S) URL per line int
 
 **Try Public Web Search** remains an optional experimental mode. It opens a temporary headless Chromium browser and queries public DuckDuckGo HTML results serially with delays. Search engines may return HTTP 403, 429 or CAPTCHA pages, which LinkTide must respect: no proxies, stealth plugins, retry floods or CAPTCHA bypass. If web search fails, LinkTide shows a warning and uses the starter list instead. The submission browser remains separate. LM Studio improves qualification, but without it results default to human review rather than bulk auto-submit.
 
+### When a directory returns HTTP 429 or 403
+
+**HTTP 429** means the directory is rate-limiting access. **HTTP 403** means access was denied. LinkTide now stops work on that directory immediately; it will not retry another URL on the same site, use proxies, or bypass a challenge. The dashboard marks that directory as **Rate Limited** or **Access Denied** and shows the blocked URL and pause-until time. The worker remembers the access pause in the app's local data directory so restarting LinkTide does not repeatedly contact a blocked site. It honors a server-supplied `Retry-After` header; where unavailable it conservatively pauses 429 sites for one hour and 403 sites for a day. Other directory opportunities can still be processed. An access denial is not recorded as a successful submission. If the directory continues to block access, review it manually after the pause; do not attempt automated evasion.
+
 ### Parallel queue
 
 After a discovery search, review the qualified opportunities and select **Run Parallel Queue**. The local worker runs up to three eligible directories concurrently, while the dashboard reports progress. Directories with an existing pending, verification-required, or live listing are skipped for that business. A submitted form is recorded as an **attempt**, not proof that a backlink is live; use the history verification action to check the listing.
