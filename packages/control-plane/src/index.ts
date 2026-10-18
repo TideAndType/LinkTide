@@ -6,7 +6,9 @@ import {
   type QualifiedOpportunity
 } from "@linktide/classifier";
 import { generateDirectoryQueries } from "@linktide/discovery";
-import { createLmStudioClient, lmStudioEndpoint, openAiBaseUrl, readTideBridgeConnection } from "@linktide/lm-studio";
+import { createLmStudioClient, lmStudioEndpoint, openAiBaseUrl } from "@linktide/lm-studio";
+import { readTideBridgeConnection } from "../../lm-studio/src/tidebridge";
+export { readTideBridgeConnection } from "../../lm-studio/src/tidebridge";
 import { directoryCatalogResults, importedDirectoryResults, searchGoogleVisibleForm, searchHeadlessChromium, type SearchResult } from "@linktide/search";
 import { generateVaultKey } from "@linktide/vault";
 
