@@ -49,9 +49,13 @@ Because macOS requires a properly signed app for true in-place automatic updates
 - Keeps bulk account creation off and never bypasses CAPTCHA, payment, consent, or verification steps.
 - Learns successful directory mappings for future runs.
 
-### Free directory search
+### Free directory discovery that does not depend on search engines
 
-Select **Search & Qualify** after building a discovery plan. LinkTide opens its own temporary headless Chromium session and reads public DuckDuckGo HTML search results, waiting at least 1.5 seconds between queries (2.5 seconds by default). No paid search API or Brave key is required. Searches may be limited, blocked, or require human verification: LinkTide does not bypass CAPTCHAs or other access restrictions and will show an error. The browser session closes after discovery; the separate Chromium submission browser remains available for form review. Connect LM Studio if you want AI-powered qualification, or LinkTide will mark results for manual review.
+After building a discovery plan, click **Find Starter Directories**. LinkTide uses a built-in, curated starting list of known business directories, and adds relevant agency directories when your profile includes services such as web design, SEO, marketing, development or managed IT. This does **not** query a search engine. It is a starting list, **not** a claim of live search results, current open applications, available backlinks, or guaranteed free listings. Review each directory's eligibility, existing listing, terms and membership requirements.
+
+To provide additional directory sites, paste one public HTTP(S) URL per line into **Add your own directory URLs**, then click **Qualify Pasted URLs**. This needs no search provider; LinkTide deduplicates URLs and qualifies them locally. Localhost and private-network URLs are not accepted.
+
+**Try Public Web Search** remains an optional experimental mode. It opens a temporary headless Chromium browser and queries public DuckDuckGo HTML results serially with delays. Search engines may return HTTP 403, 429 or CAPTCHA pages, which LinkTide must respect: no proxies, stealth plugins, retry floods or CAPTCHA bypass. If web search fails, LinkTide shows a warning and uses the starter list instead. The submission browser remains separate. LM Studio improves qualification, but without it results default to human review rather than bulk auto-submit.
 
 ### Parallel queue
 
