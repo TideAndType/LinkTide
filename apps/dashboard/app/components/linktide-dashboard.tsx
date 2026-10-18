@@ -127,6 +127,9 @@ type SubmissionHistoryRecord = {
 
 type AutomationResult = {
   status?: string;
+  blockedUrl?: string;
+  retryAt?: string;
+  httpStatus?: number;
   submitted?: boolean;
   browserLeftOpen?: boolean;
   reasons?: string[];
@@ -766,7 +769,14 @@ export function LinkTideDashboard() {
         [item.id]: result
       }));
 
-      if (mode === "submit") {
+      if (result.status === "rate_limited" || result.status === "access_denied") {
+        setBatchMessage(
+          item.domain + " is paused (" + (result.httpStatus ?? "access denied") +
+          "). LinkTide will not revisit it during the cooldown. " +
+          (result.retryAt ? "Retry after " + new Date(result.retryAt).toLocaleString() + ". " : "") +
+          "Choose another directory while this one is blocked."
+        );
+      } else if (mode === "submit") {
         await loadHistory();
       } else if (mode === "prepare") {
         setBatchMessage(result.fillResult
@@ -785,7 +795,10 @@ export function LinkTideDashboard() {
 
   async function processQueue() {
     const queued =
-      searchRun?.opportunities.filter((item) => item.action === "queue") ?? [];
+      searchRun?.opportunities.filter((item) =>
+        item.action === "queue" &&
+        !["rate_limited", "access_denied"].includes(automationResults[item.id]?.status ?? "")
+      ) ?? [];
 
     if (!queued.length) {
       setError("There are no queued opportunities to process.");
@@ -1283,7 +1296,9 @@ export function LinkTideDashboard() {
                 className="primary smallButton"
                 type="button"
                 onClick={processQueue}
-                disabled={batchRunning || activeAutomationId !== null || searchRun.queued === 0}
+                disabled={batchRunning || activeAutomationId !== null ||
+                  !searchRun.opportunities.some((item) => item.action === "queue" &&
+                    !["rate_limited", "access_denied"].includes(automationResults[item.id]?.status ?? ""))}
               >
                 {batchRunning ? "Running Parallel Queue..." : "Run Parallel Queue"}
               </button>
@@ -1327,6 +1342,7 @@ export function LinkTideDashboard() {
                 const automation = automationResults[item.id];
                 const inspection = automation?.inspection ?? automation;
                 const busy = activeAutomationId === item.id;
+                const blocked = ["rate_limited", "access_denied"].includes(automation?.status ?? "");
 
                 return (
                   <article className="opportunity" key={item.id}>
@@ -1345,7 +1361,7 @@ export function LinkTideDashboard() {
                         <button
                           className="secondary smallButton"
                           type="button"
-                          disabled={busy || batchRunning || activeAutomationId !== null}
+                          disabled={busy || blocked || batchRunning || activeAutomationId !== null}
                           onClick={() => runAutomation(item, "inspect")}
                         >
                           {busy ? "Working..." : "Inspect"}
@@ -1353,7 +1369,7 @@ export function LinkTideDashboard() {
                         <button
                           className="secondary smallButton"
                           type="button"
-                          disabled={busy || batchRunning || activeAutomationId !== null || item.action === "skip"}
+                          disabled={busy || blocked || batchRunning || activeAutomationId !== null || item.action === "skip"}
                           onClick={() => runAutomation(item, "prepare")}
                         >
                           {busy ? "Working..." : "Find & Fill Form"}
@@ -1361,7 +1377,7 @@ export function LinkTideDashboard() {
                         <button
                           className="primary smallButton"
                           type="button"
-                          disabled={busy || batchRunning || activeAutomationId !== null || item.action === "skip"}
+                          disabled={busy || blocked || batchRunning || activeAutomationId !== null || item.action === "skip"}
                           onClick={() => runAutomation(item, "submit")}
                         >
                           {busy ? "Working..." : "Fill & Submit"}
@@ -1401,6 +1417,17 @@ export function LinkTideDashboard() {
                               </span>
                             ) : null}
                           </div>
+
+                          {blocked ? (
+                            <p className="automationWarning">
+                              Directory access paused (HTTP {automation.httpStatus ?? 429}).
+                              {automation.blockedUrl ? " Blocked page: " + automation.blockedUrl + "." : ""}
+                              {automation.retryAt
+                                ? " Suggested earliest retry: " + new Date(automation.retryAt).toLocaleString() + "."
+                                : " Do not repeatedly retry."}
+                              {" Choose another directory."}
+                            </p>
+                          ) : null}
 
                           {inspection?.submissionPageUrl ? (
                             <p className="tiny muted automationUrl">
