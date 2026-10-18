@@ -285,7 +285,13 @@ async function openOpportunity(
       return await inspectOpportunity(context, url);
     } catch (error) {
       if (error instanceof DirectoryAccessError) {
-        await rememberDirectoryAccess(error, domain);
+        try {
+          await rememberDirectoryAccess(error, domain);
+        } catch (saveError) {
+          // Persistence failure must not erase the actual access denial or
+          // cause a fallback visit to the same rate-limited directory.
+          console.warn("Could not save directory pause:", saveError);
+        }
       }
       throw error;
     }
