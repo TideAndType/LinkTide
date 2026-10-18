@@ -20,6 +20,7 @@ import {
   getPublicSettings,
   listLoadedLmStudioModels,
   loadSettings,
+  readTideBridgeConnection,
   runDiscoverySearch,
   testLmStudioConnection,
   updateSettings
@@ -39,7 +40,7 @@ import {
   type BusinessSubmissionProfile,
   type FieldMapping
 } from "@linktide/form-mapper";
-import { createLmStudioClient, readTideBridgeConnection } from "@linktide/lm-studio";
+import { createLmStudioClient } from "@linktide/lm-studio";
 import {
   applyRecipe,
   buildRecipe,
