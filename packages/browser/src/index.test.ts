@@ -4,6 +4,8 @@ import {
   rankSubmissionLinks,
   pickSubmissionForm,
   scoreSubmissionForm,
+  DirectoryAccessError,
+  retryAfterSeconds,
   type FormDescriptor,
   type OpportunityInspection
 } from "./index";
@@ -81,4 +83,24 @@ test("uses same-site navigation but avoids external login and payments", () => {
   ]);
   assert.equal(links.length, 1);
   assert.equal(links[0].url, "https://app.example.com/add-listing");
+});
+
+
+test("understands Retry-After delta seconds and HTTP dates without retrying", () => {
+  const now = Date.parse("2026-10-18T12:00:00Z");
+  assert.equal(retryAfterSeconds("120", now), 120);
+  assert.equal(retryAfterSeconds("Sun, 18 Oct 2026 12:05:00 GMT", now), 300);
+  assert.equal(retryAfterSeconds("invalid", now), undefined);
+  assert.equal(retryAfterSeconds(null, now), undefined);
+  assert.equal(retryAfterSeconds("Sun, 18 Oct 2026 11:59:00 GMT", now), 0);
+});
+
+test("distinguishes rate-limited directories from explicit 403 blocks", () => {
+  const rateLimited = new DirectoryAccessError(429, "https://directory.example.com/add-listing", 3600);
+  assert.equal(rateLimited.statusCode, 429);
+  assert.equal(rateLimited.retryAfterSeconds, 3600);
+  assert.match(rateLimited.message, /rate-limiting.*429/i);
+  const denied = new DirectoryAccessError(403, "https://directory.example.com/claim");
+  assert.equal(denied.statusCode, 403);
+  assert.match(denied.message, /denied.*403/i);
 });
