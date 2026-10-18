@@ -92,3 +92,23 @@ test("import user directory URLs safely without web searching", () => {
   assert.equal(results[1].domain, "otherexample.com");
   assert.ok(results.every((item) => item.query === "manually imported directory URLs"));
 });
+
+
+test("unwraps Google search click redirect into a directory destination", () => {
+  const target = "https://example-directory.com/submit?source=search";
+  const googleRedirect = "https://www.google.com/url?q=" +
+    encodeURIComponent(target) + "&sa=U";
+  assert.equal(normalizeSearchResultUrl(googleRedirect), target);
+  assert.equal(normalizeSearchResultUrl("https://www.google.com/search?q=directory"), undefined);
+  assert.equal(normalizeSearchResultUrl("https://www.google.com/url?q=javascript%3Aalert(1)"), undefined);
+});
+
+test("filters internal Google links from normalized search results", () => {
+  const results = normalizeSearchResults("directory", [
+    { title: "Google search", url: "https://www.google.com/search?q=test", description: "" },
+    { title: "Submit directory", url: "https://example.net/add-business", description: "Free profile" },
+    { title: "Google internal", url: "https://google.co.uk/preferences", description: "" }
+  ], 10);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].domain, "example.net");
+});

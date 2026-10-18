@@ -7,7 +7,7 @@ import {
 } from "@linktide/classifier";
 import { generateDirectoryQueries } from "@linktide/discovery";
 import { createLmStudioClient, lmStudioEndpoint, openAiBaseUrl } from "@linktide/lm-studio";
-import { directoryCatalogResults, importedDirectoryResults, searchHeadlessChromium, type SearchResult } from "@linktide/search";
+import { directoryCatalogResults, importedDirectoryResults, searchGoogleVisibleForm, searchHeadlessChromium, type SearchResult } from "@linktide/search";
 import { generateVaultKey } from "@linktide/vault";
 
 export type LinkTideSettings = {
@@ -48,7 +48,7 @@ export type SearchRequest = {
     locations?: string[];
   };
   queries?: string[];
-  source?: "catalog" | "chromium";
+  source?: "catalog" | "chromium" | "google-form";
   manualUrls?: string[];
 };
 
@@ -618,7 +618,7 @@ export async function runDiscoverySearch(body: SearchRequest) {
         .map((url) => url.trim()).filter(Boolean).slice(0, 100)
     : [];
 
-  let provider: "catalog" | "chromium" | "manual" = "catalog";
+  let provider: "catalog" | "chromium" | "google-form" | "manual" = "catalog";
   let warning: string | undefined;
   let searchResults: { results: SearchResult[]; searchesRun: number };
 
@@ -631,6 +631,28 @@ export async function runDiscoverySearch(body: SearchRequest) {
     }
     provider = "manual";
     searchResults = { results, searchesRun: 0 };
+  } else if (body.source === "google-form" && queries.length) {
+    // The visible browser performs one real search-form submission per click.
+    // A blocked/challenged search cannot be used to trigger automated retries.
+    try {
+      searchResults = await searchGoogleVisibleForm({
+        query: queries[0],
+        count: perQuery
+      });
+      provider = "google-form";
+    } catch (error) {
+      warning = "Google visible search could not complete (" +
+        (error instanceof Error ? error.message : "unknown issue") +
+        "). Showing the directory starter list instead. " +
+        "No search restrictions or verification challenges were bypassed.";
+      provider = "catalog";
+      searchResults = {
+        results: directoryCatalogResults({
+          primaryCategory: business?.primaryCategory, niches, services
+        }),
+        searchesRun: 0
+      };
+    }
   } else if (body.source === "chromium" && queries.length) {
     try {
       searchResults = await searchHeadlessChromium({

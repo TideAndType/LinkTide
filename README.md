@@ -55,6 +55,8 @@ After building a discovery plan, click **Find Starter Directories**. LinkTide us
 
 To provide additional directory sites, paste one public HTTP(S) URL per line into **Add your own directory URLs**, then click **Qualify Pasted URLs**. This needs no search provider; LinkTide deduplicates URLs and qualifies them locally. Localhost and private-network URLs are not accepted.
 
+**Search Google in Visible Browser** is a separate, opt-in experiment. Choose one of the planned search queries in the dropdown, then click the button. LinkTide launches a visible Chromium window, visits Google's home page, clicks the search field, fills the selected query and presses Enter. If readable organic results are returned, LinkTide qualifies them and adds unique domains from later successful searches to the same queue. You can observe the normal search UI. This remains automation, and Google may restrict it or request consent or human verification; LinkTide never bypasses an access restriction and uses the starter directory list instead if the search fails. We have not confirmed this mode against a live Google search from your Mac; the unit tests cover link parsing, not live provider availability.
+
 **Try Public Web Search** remains an optional experimental mode. It opens a temporary headless Chromium browser and queries public DuckDuckGo HTML results serially with delays. Search engines may return HTTP 403, 429 or CAPTCHA pages, which LinkTide must respect: no proxies, stealth plugins, retry floods or CAPTCHA bypass. If web search fails, LinkTide shows a warning and uses the starter list instead. The submission browser remains separate. LM Studio improves qualification, but without it results default to human review rather than bulk auto-submit.
 
 ### Parallel queue
