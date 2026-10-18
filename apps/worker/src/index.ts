@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createDirectoryAccount,
@@ -8,6 +9,7 @@ import {
 import {
   inspectOpportunity,
   launchAutomationBrowser,
+  DirectoryAccessError,
   pickSubmissionForm,
   type FormFieldDescriptor,
   type OpportunityInspection
@@ -84,6 +86,83 @@ function vaultPath() {
 function historyPath() {
   return join(dataDir(), "submission-history.json");
 }
+
+type DirectoryPause = {
+  status: 403 | 429;
+  url: string;
+  until: number;
+};
+
+const directoryPauses = new Map<string, DirectoryPause>();
+let pauseWrite = Promise.resolve();
+
+function pausePath() {
+  return join(dataDir(), "directory-access-pauses.json");
+}
+
+async function loadDirectoryPauses() {
+  try {
+    const data = JSON.parse(await readFile(pausePath(), "utf8")) as Record<string, DirectoryPause>;
+    for (const [domain, pause] of Object.entries(data)) {
+      if (pause && (pause.status === 429 || pause.status === 403) &&
+          typeof pause.url === "string" && Number.isFinite(pause.until) &&
+          pause.until > Date.now()) {
+        directoryPauses.set(domain, pause);
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn("Could not restore directory access pause data:", error);
+    }
+  }
+}
+
+function activeDirectoryPause(domain: string): DirectoryPause | undefined {
+  const pause = directoryPauses.get(domain);
+  if (!pause) return undefined;
+  if (pause.until > Date.now()) return pause;
+  directoryPauses.delete(domain);
+  return undefined;
+}
+
+async function rememberDirectoryAccess(error: DirectoryAccessError, domain: string) {
+  // Respect the server's Retry-After when supplied; otherwise conservatively
+  // pause for one hour on 429, or a full day on explicit 403 denial.
+  const seconds = error.statusCode === 403
+    ? 86400
+    : Math.max(60, error.retryAfterSeconds ?? 3600);
+  const until = Date.now() + seconds * 1000;
+  const previous = activeDirectoryPause(domain);
+  directoryPauses.set(domain, {
+    status: error.statusCode,
+    url: error.url,
+    until: Math.max(until, previous?.until ?? 0)
+  });
+
+  // Serialize on-disk writes when independent batch lanes block concurrently.
+  pauseWrite = pauseWrite.catch(() => undefined).then(async () => {
+    await mkdir(dataDir(), { recursive: true });
+    await writeFile(
+      pausePath(), JSON.stringify(Object.fromEntries(directoryPauses), null, 2),
+      { encoding: "utf8", mode: 0o600 }
+    );
+  });
+  await pauseWrite;
+}
+
+function accessReport(error: DirectoryAccessError) {
+  const pause = activeDirectoryPause(domainOf(error.url));
+  return {
+    status: error.statusCode === 429 ? "rate_limited" : "access_denied",
+    submitted: false,
+    browserLeftOpen: false,
+    blockedUrl: error.url,
+    retryAt: pause ? new Date(pause.until).toISOString() : undefined,
+    httpStatus: error.statusCode,
+    reasons: [error.message]
+  };
+}
+
 
 function domainOf(value: string) {
   const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
@@ -191,10 +270,33 @@ async function openOpportunity(
   requestedUrl: string,
   recipe?: DirectoryRecipe
 ): Promise<{ page: Page; inspection: OpportunityInspection }> {
+  const domain = domainOf(requestedUrl);
+  const paused = activeDirectoryPause(domain);
+  if (paused) {
+    throw new DirectoryAccessError(
+      paused.status, paused.url,
+      Math.ceil((paused.until - Date.now()) / 1000)
+    );
+  }
+
+  const inspect = async (url: string) => {
+    try {
+      return await inspectOpportunity(context, url);
+    } catch (error) {
+      if (error instanceof DirectoryAccessError) {
+        await rememberDirectoryAccess(error, domain);
+      }
+      throw error;
+    }
+  };
+
   if (recipe?.submissionUrl) {
     try {
-      return await inspectOpportunity(context, recipe.submissionUrl);
+      return await inspect(recipe.submissionUrl);
     } catch (error) {
+      // Crucial: do not immediately retry the directory homepage following
+      // HTTP 403/429. That defeats the server's rate-limit response.
+      if (error instanceof DirectoryAccessError) throw error;
       console.warn(
         "Learned submission URL failed; falling back to discovered URL:",
         error instanceof Error ? error.message : error
@@ -202,7 +304,7 @@ async function openOpportunity(
     }
   }
 
-  return inspectOpportunity(context, requestedUrl);
+  return inspect(requestedUrl);
 }
 
 function pickForm(inspection: OpportunityInspection) {
@@ -865,6 +967,7 @@ function send(
 
 export async function startWorkerServer() {
   await loadSettings(dataDir());
+  await loadDirectoryPauses();
 
   const port = Number(process.env.LINKTIDE_WORKER_PORT ?? 4317);
   let busy = false;
@@ -1167,11 +1270,16 @@ export async function startWorkerServer() {
               reports[index] = {
                 id: item.id,
                 url: item.url,
-                status: "failed",
-                submitted: false,
-                reasons: [error instanceof Error ? error.message : "Worker job failed."]
+                ...(error instanceof DirectoryAccessError
+                  ? accessReport(error)
+                  : {
+                      status: "failed",
+                      submitted: false,
+                      reasons: [error instanceof Error ? error.message : "Worker job failed."]
+                    })
               };
-              batchProgress.failed++;
+              if (error instanceof DirectoryAccessError) batchProgress.needsReview++;
+              else batchProgress.failed++;
             } finally {
               batchProgress.completed++;
               batchProgress.current = batchProgress.current.filter((domain) => domain !== item.domain);
@@ -1189,6 +1297,11 @@ export async function startWorkerServer() {
         for (let index = 0; index < remaining.length; index++) {
           const report = reports[index];
           const item = remaining[index];
+          if (report.status === "rate_limited" || report.status === "access_denied") {
+            // A rejected navigation is not a submission attempt.
+            completed.push(report);
+            continue;
+          }
           try {
             const historyRecord = await recordSubmissionAttempt({
               url: item.url,
@@ -1339,14 +1452,17 @@ export async function startWorkerServer() {
           );
         }
       } catch (error) {
-        send(
-          res,
-          500,
-          {
-            error: error instanceof Error ? error.message : "Worker job failed."
-          },
-          origin
-        );
+        if (error instanceof DirectoryAccessError) {
+          // Return an actionable, non-fatal result so the UI can show the
+          // blocked directory and its cooldown instead of only a toast error.
+          send(res, 200, accessReport(error), origin);
+        } else {
+          send(
+            res, 500,
+            { error: error instanceof Error ? error.message : "Worker job failed." },
+            origin
+          );
+        }
       } finally {
         busy = false;
       }
