@@ -41,7 +41,11 @@ export function normalizeSearchResultUrl(value: string): string | undefined {
     if (parsed.username || parsed.password) return undefined;
 
     const host = parsed.hostname.toLowerCase();
-    if (!host || host === "localhost" || host.endsWith(".localhost") ||
+    const privateIpv4 = /^(?:10\.|127\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.)/.test(host);
+    const privateIpv6 = host.startsWith("[") || host.includes(":");
+    if (!host || privateIpv4 || privateIpv6 || parsed.port ||
+        host === "localhost" || host.endsWith(".localhost") ||
+        host.endsWith(".local") || host.endsWith(".internal") ||
         host === "127.0.0.1" || host === "::1" ||
         host.endsWith(".duckduckgo.com") || host === "duckduckgo.com") {
       return undefined;
@@ -173,4 +177,79 @@ export async function searchHeadlessChromium(input: {
   } finally {
     await browser.close();
   }
+}
+
+
+type DirectorySeed = RawSearchResult & {
+  type: "general" | "agency";
+};
+
+/**
+ * Small, review-first directory starter list. This is a known-source catalog,
+ * NOT a live web search or a guarantee of free/eligible/current submission.
+ * Start pages may require login, payment or separate listing verification.
+ */
+const DIRECTORY_SEEDS: DirectorySeed[] = [
+  { title: "Google Business Profile", url: "https://www.google.com/business/",
+    description: "Local business profile. Check eligibility and ownership verification.", type: "general" },
+  { title: "Bing Places for Business", url: "https://www.bingplaces.com/",
+    description: "Local search directory. Check existing business profile and verify ownership.", type: "general" },
+  { title: "Apple Business Connect", url: "https://businessconnect.apple.com/",
+    description: "Apple Maps business listing. Business verification required.", type: "general" },
+  { title: "Yelp for Business", url: "https://biz.yelp.com/",
+    description: "Business directory profile. Existing listing check and verification may be required.", type: "general" },
+  { title: "Manta Free Business Listing", url: "https://www.manta.com/business-listings/free-business-listing",
+    description: "Business directory with a free listing option; check eligibility.", type: "general" },
+  { title: "Better Business Bureau", url: "https://www.bbb.org/",
+    description: "Business profiles and accreditation. Different services may have different requirements.", type: "general" },
+  { title: "ChamberofCommerce.com", url: "https://www.chamberofcommerce.com/",
+    description: "Business directory; review listing and eligibility requirements.", type: "general" },
+  { title: "Yellow Pages", url: "https://www.yellowpages.com/",
+    description: "General business directory; check if a listing already exists.", type: "general" },
+  { title: "Alignable", url: "https://www.alignable.com/",
+    description: "Local business network; membership/account may be required.", type: "general" },
+  { title: "Clutch", url: "https://clutch.co/get-listed",
+    description: "Agency and B2B service-provider directory; basic profile and review process.", type: "agency" },
+  { title: "DesignRush", url: "https://www.designrush.com/",
+    description: "Agency directory for design, marketing and development firms.", type: "agency" },
+  { title: "GoodFirms", url: "https://www.goodfirms.co/",
+    description: "Agency and technology service-provider directory.", type: "agency" },
+  { title: "UpCity", url: "https://upcity.com/",
+    description: "B2B services marketplace and agency directory; eligibility may vary.", type: "agency" },
+  { title: "Agency Spotter", url: "https://www.agencyspotter.com/",
+    description: "Agency discovery and service-provider directory.", type: "agency" },
+  { title: "Sortlist", url: "https://www.sortlist.com/",
+    description: "Agency and digital-services directory; review account requirements.", type: "agency" }
+];
+
+export function directoryCatalogResults(profile: {
+  primaryCategory?: string;
+  niches?: string[];
+  services?: string[];
+} = {}): SearchResult[] {
+  const terms = [profile.primaryCategory ?? "", ...(profile.niches ?? []),
+    ...(profile.services ?? [])].join(" ").toLowerCase();
+  const agencyRelated = /marketing|web|seo|design|digital|advertis|creative|agency|branding|software|developer|it support|managed service|technology|consult/i.test(terms);
+  const chosen = DIRECTORY_SEEDS.filter((entry) =>
+    entry.type === "general" || agencyRelated
+  );
+  return normalizeSearchResults(
+    "curated directory starter list",
+    chosen,
+    chosen.length
+  );
+}
+
+export function importedDirectoryResults(values: string[]): SearchResult[] {
+  const manual: RawSearchResult[] = [];
+  for (const value of values.slice(0, 100)) {
+    const url = normalizeSearchResultUrl(value.trim());
+    if (!url) continue;
+    manual.push({
+      title: new URL(url).hostname.replace(/^www\./, "") + " (imported)",
+      url,
+      description: "Directory URL you provided. Check listing relevance, rules and eligibility before submitting."
+    });
+  }
+  return normalizeSearchResults("manually imported directory URLs", manual, 100);
 }
