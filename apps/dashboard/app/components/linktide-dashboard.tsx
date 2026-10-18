@@ -27,12 +27,14 @@ type BusinessProfile = {
 };
 
 type AppSettings = {
+  lmStudioConnection: "tidebridge" | "manual";
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   lmStudioApiKey: string;
 };
 
 type PublicSettings = {
+  lmStudioConnection: "tidebridge" | "manual";
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   hasLmStudioApiKey: boolean;
@@ -191,6 +193,7 @@ const emptyProfile: BusinessProfile = {
 };
 
 const emptySettings: AppSettings = {
+  lmStudioConnection: "tidebridge",
   lmStudioBaseUrl: "",
   lmStudioModel: "",
   lmStudioApiKey: ""
@@ -431,6 +434,7 @@ export function LinkTideDashboard() {
       setPublicSettings(result);
       setSettings((current) => ({
         ...current,
+        lmStudioConnection: result.lmStudioConnection ?? "tidebridge",
         lmStudioBaseUrl: result.lmStudioBaseUrl ?? "",
         lmStudioModel: result.lmStudioModel ?? ""
       }));
@@ -472,6 +476,36 @@ export function LinkTideDashboard() {
       await testWorker();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save settings.");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  async function useTideBridge() {
+    setSavingSettings(true);
+    setError("");
+    try {
+      const response = await fetch(`${workerUrl}/settings/use-tidebridge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}"
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "TideBridge connection failed.");
+      const saved = result.settings as PublicSettings;
+      setPublicSettings(saved);
+      setSettings((current) => ({
+        ...current,
+        lmStudioConnection: "tidebridge",
+        lmStudioBaseUrl: saved.lmStudioBaseUrl,
+        lmStudioModel: saved.lmStudioModel
+      }));
+      setLoadedModels(Array.isArray(result.models) ? result.models : []);
+      setSettingsMessage(result.description + (result.warning ? " " + result.warning : "") +
+        " LinkTide uses local LM Studio directly; TideBridge's WordPress pairing token is never copied.");
+      await testWorker();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not use TideBridge.");
     } finally {
       setSavingSettings(false);
     }
@@ -1056,19 +1090,44 @@ export function LinkTideDashboard() {
           <form className="panel compact" onSubmit={saveAppSettings}>
             <p className="eyebrow">SETTINGS</p>
             <h2>Connections</h2>
+            <p className="muted">
+              LinkTide shares TideBridge's local LM Studio connection on this
+              Mac. No Cloudflare tunnel, VPS or second pairing is needed.
+            </p>
+            <button className="secondary full" type="button"
+              disabled={savingSettings}
+              onClick={() => void useTideBridge()}>
+              Use TideBridge Local Connection
+            </button>
+            <p className="tiny muted">
+              Active mode: {publicSettings?.lmStudioConnection === "manual"
+                ? "Manual local connection" : "TideBridge shared connection"}.
+            </p>
 
             <div className="settingsFields">
               <label>
-                LM Studio server URL (local or Cloudflare tunnel)
+                Local LM Studio address
                 <input
                   value={settings.lmStudioBaseUrl}
-                  onChange={(e) => updateSetting("lmStudioBaseUrl", e.target.value)}
+                  onChange={(e) => setSettings((current) => ({
+                    ...current,
+                    lmStudioConnection: "manual",
+                    lmStudioBaseUrl: e.target.value
+                  }))}
                   placeholder="http://127.0.0.1:1234/v1"
+                  readOnly={settings.lmStudioConnection === "tidebridge"}
                 />
                 <small className="muted">
-                  On this Mac use http://127.0.0.1:1234/v1. For a tunnel, paste
-                  its HTTPS URL. LinkTide automatically handles the /v1 path.
+                  In TideBridge mode this comes from the Mac app's saved
+                  connection. Use TideBridge to change the port. Switch to
+                  manual local setup only when needed.
                 </small>
+                <button className="modelRefresh" type="button"
+                  onClick={() => setSettings((current) => ({
+                    ...current, lmStudioConnection: "manual"
+                  }))}>
+                  Edit local address manually
+                </button>
               </label>
               <label>
                 LM Studio model
