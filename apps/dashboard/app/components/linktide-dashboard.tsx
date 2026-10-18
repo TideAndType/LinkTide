@@ -242,6 +242,7 @@ export function LinkTideDashboard() {
   const [searching, setSearching] = useState(false);
   const [searchRun, setSearchRun] = useState<SearchRun | null>(null);
   const [manualDirectoryUrls, setManualDirectoryUrls] = useState("");
+  const [selectedSearchQuery, setSelectedSearchQuery] = useState("");
   const [activeAutomationId, setActiveAutomationId] = useState<string | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchMessage, setBatchMessage] = useState("");
@@ -632,6 +633,7 @@ export function LinkTideDashboard() {
       }
 
       setPlan(result);
+      setSelectedSearchQuery(result.queries[0] ?? "");
       setSearchRun(null);
       setAutomationResults({});
       window.localStorage.removeItem("linktide.opportunityQueue");
@@ -644,7 +646,7 @@ export function LinkTideDashboard() {
     }
   }
 
-  async function searchAndQualify(source: "catalog" | "chromium" = "catalog") {
+  async function searchAndQualify(source: "catalog" | "chromium" | "google-form" = "catalog") {
     if (!plan?.queries.length) {
       setError("Build a discovery plan before running live search.");
       return;
@@ -666,7 +668,9 @@ export function LinkTideDashboard() {
             services: splitCsv(profile.services),
             locations: splitCsv(profile.locations)
           },
-          queries: plan.queries,
+          queries: source === "google-form"
+            ? [selectedSearchQuery || plan.queries[0]]
+            : plan.queries,
           source,
           manualUrls: manualDirectoryUrls.split(/[\s,]+/).map((url) => url.trim()).filter(Boolean)
         })
@@ -677,11 +681,35 @@ export function LinkTideDashboard() {
         throw new Error(result.error ?? "Live discovery failed.");
       }
 
-      setSearchRun(result);
+      let nextRun: SearchRun = result;
+      if (source === "google-form" && result.provider === "google-form" &&
+          searchRun?.provider === "google-form") {
+        // Search one query at a time; keep qualified directories from
+        // earlier successful Google searches rather than replacing them.
+        const domains = new Map<string, QualifiedOpportunity>();
+        for (const opportunity of [...searchRun.opportunities, ...result.opportunities]) {
+          if (!domains.has(opportunity.domain)) domains.set(opportunity.domain, opportunity);
+        }
+        const opportunities = [...domains.values()].sort((a, b) => {
+          const ranks = { queue: 0, review: 1, skip: 2 };
+          return ranks[a.action] - ranks[b.action] || b.relevanceScore - a.relevanceScore;
+        });
+        nextRun = {
+          ...result,
+          searchesRun: searchRun.searchesRun + result.searchesRun,
+          rawResults: searchRun.rawResults + result.rawResults,
+          uniqueDomains: opportunities.length,
+          queued: opportunities.filter((item) => item.action === "queue").length,
+          review: opportunities.filter((item) => item.action === "review").length,
+          skipped: opportunities.filter((item) => item.action === "skip").length,
+          opportunities
+        };
+      }
+      setSearchRun(nextRun);
       setAutomationResults({});
       window.localStorage.setItem(
         "linktide.opportunityQueue",
-        JSON.stringify(result)
+        JSON.stringify(nextRun)
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Live discovery failed.");
@@ -1168,9 +1196,29 @@ export function LinkTideDashboard() {
                   Clear this field to use the starter list or optional web search.
                 </small>
               </label>
+              <label>
+                Google search query (one at a time)
+                <select
+                  value={selectedSearchQuery || plan.queries[0] || ""}
+                  onChange={(event) => setSelectedSearchQuery(event.target.value)}
+                >
+                  {plan.queries.map((query, index) => (
+                    <option value={query} key={query + index}>{query}</option>
+                  ))}
+                </select>
+                <small className="muted">
+                  Opens visible Chromium, fills Google's search field and presses Enter.
+                  Google may restrict automation or ask for verification. LinkTide does
+                  not bypass those restrictions. Repeat with another query to add results.
+                </small>
+              </label>
+              <button className="secondary" onClick={() => void searchAndQualify("google-form")} type="button"
+                disabled={searching || Boolean(manualDirectoryUrls.trim())}>
+                Search Google in Visible Browser
+              </button>
               <button className="secondary" onClick={() => void searchAndQualify("chromium")} type="button"
                 disabled={searching || Boolean(manualDirectoryUrls.trim())}>
-                Try Public Web Search (may be blocked)
+                Try DuckDuckGo HTML Search (may be blocked)
               </button>
             </div>
 
@@ -1222,6 +1270,7 @@ export function LinkTideDashboard() {
             <p className="tiny muted">
               Source: {searchRun.provider === "catalog" ? "Curated starter list (not live search)" :
                 searchRun.provider === "manual" ? "URLs supplied by you" :
+                searchRun.provider === "google-form" ? "Visible Google search form" :
                 "Public browser search"}. Review listing eligibility and submission requirements.
             </p>
             {batchMessage ? (
