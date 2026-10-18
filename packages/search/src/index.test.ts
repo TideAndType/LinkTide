@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizeSearchResultUrl,
-  normalizeSearchResults
+  normalizeSearchResults,
+  directoryCatalogResults,
+  importedDirectoryResults
 } from "./index";
 
 test("unwraps DuckDuckGo redirect without contacting a tracking URL", () => {
@@ -58,4 +60,35 @@ test("keeps direct HTTPS URLs and strips fragments", () => {
     normalizeSearchResultUrl("https://agency.example.com/join?ref=directory#steps"),
     "https://agency.example.com/join?ref=directory"
   );
+});
+
+
+test("starter catalog works without making search engine requests", () => {
+  const general = directoryCatalogResults({ primaryCategory: "Florist" });
+  const agencies = directoryCatalogResults({
+    primaryCategory: "Web Design and SEO",
+    services: ["Marketing"]
+  });
+  assert.ok(general.length >= 6);
+  assert.ok(agencies.length > general.length);
+  assert.ok(agencies.some((item) => item.domain === "clutch.co"));
+  assert.ok(agencies.some((item) => item.domain === "designrush.com"));
+  assert.ok(general.some((item) => item.domain === "manta.com"));
+  assert.ok(general.every((item) => item.url.startsWith("https://")));
+});
+
+test("import user directory URLs safely without web searching", () => {
+  const results = importedDirectoryResults([
+    "https://www.exampledirectory.com/add-business",
+    "https://www.exampledirectory.com/add-business#top",
+    "http://localhost:4317/settings",
+    "http://192.168.1.10/internal",
+    "https://private.local/home",
+    "file:///etc/passwd",
+    "https://otherexample.com/submit"
+  ]);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].domain, "exampledirectory.com");
+  assert.equal(results[1].domain, "otherexample.com");
+  assert.ok(results.every((item) => item.query === "manually imported directory URLs"));
 });
