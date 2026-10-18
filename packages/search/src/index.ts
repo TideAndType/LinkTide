@@ -37,6 +37,13 @@ export function normalizeSearchResultUrl(value: string): string | undefined {
       return normalizeSearchResultUrl(destination);
     }
 
+    const googleHost = /^(?:www\.)?google\.[a-z.]+$/i.test(parsed.hostname);
+    if (googleHost && parsed.pathname === "/url") {
+      const destination = parsed.searchParams.get("q") ?? parsed.searchParams.get("url");
+      return destination ? normalizeSearchResultUrl(destination) : undefined;
+    }
+    if (googleHost) return undefined;
+
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined;
     if (parsed.username || parsed.password) return undefined;
 
@@ -171,6 +178,115 @@ export async function searchHeadlessChromium(input: {
       }
 
       return { results, searchesRun };
+    } finally {
+      await context.close();
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
+
+/**
+ * A user-initiated Google search using the visible search form.
+ *
+ * Exactly one query is run per invocation. No stealth browser fingerprinting,
+ * proxy rotation, challenges or consent acceptance. If Google rejects a query,
+ * stop and let the caller use its directory catalog/manual import instead.
+ * The browser is temporary and separate from the submission browser profile.
+ */
+export async function searchGoogleVisibleForm(input: {
+  query: string;
+  count?: number;
+}): Promise<{ results: SearchResult[]; searchesRun: number }> {
+  const query = input.query.trim();
+  if (!query) throw new Error("Choose a search query first.");
+  if (query.length > 500) throw new Error("Search query is too long.");
+  const count = Math.max(1, Math.min(20, Math.floor(input.count ?? 10)));
+
+  const browser = await chromium.launch({
+    headless: false
+  });
+  try {
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1360, height: 900 }
+    });
+    try {
+      const page = await context.newPage();
+      const home = await page.goto("https://www.google.com/", {
+        waitUntil: "domcontentloaded", timeout: 30000
+      });
+      if (!home || home.status() === 403 || home.status() === 429) {
+        throw new Error("Google denied access to the search page. " +
+          "LinkTide will not attempt to bypass that restriction.");
+      }
+
+      // Interact with Google's visible input just as a browser user would:
+      // focus the field, enter the query, and submit via Enter.
+      const searchBox = page.locator('textarea[name="q"], input[name="q"]').first();
+      try {
+        await searchBox.waitFor({ state: "visible", timeout: 15000 });
+      } catch {
+        throw new Error(
+          "Google did not show a usable search form (possibly consent or verification). " +
+          "Open the site yourself if action is required."
+        );
+      }
+
+      await searchBox.click();
+      await searchBox.fill(query);
+      await searchBox.press("Enter");
+
+      await page.waitForURL((url) =>
+        url.pathname === "/search" ||
+        url.pathname.startsWith("/sorry") ||
+        url.hostname === "consent.google.com",
+      { timeout: 20000 }).catch(() => undefined);
+      await page.locator("#search a:has(h3), #rso a:has(h3)").first()
+        .waitFor({ state: "attached", timeout: 10000 })
+        .catch(() => undefined);
+
+      if (page.url().includes("/sorry") ||
+          page.url().includes("consent.google.com")) {
+        throw new Error(
+          "Google requires verification or consent. " +
+          "LinkTide stopped without interacting with the challenge."
+        );
+      }
+
+      const raw = await page.locator("#search a:has(h3), #rso a:has(h3)")
+        .evaluateAll((links) =>
+          links.slice(0, 60).map((link) => {
+            const anchor = link as HTMLAnchorElement;
+            const heading = anchor.querySelector("h3");
+            const result = anchor.closest(".MjjYud, [data-hveid]") ??
+              anchor.parentElement?.parentElement;
+            const title = (heading?.textContent ?? "").replace(/\s+/g, " ").trim();
+            const description = (result?.textContent ?? "")
+              .replace(/\s+/g, " ").replace(title, "").trim().slice(0, 600);
+            return {
+              title,
+              url: anchor.href,
+              description
+            };
+          })
+        );
+
+      const results = normalizeSearchResults(query, raw, count);
+      if (!results.length) {
+        const body = (await page.locator("body").innerText().catch(() => ""))
+          .slice(0, 3000);
+        if (blockedPattern.test(body)) {
+          throw new Error("Google requested human verification or blocked automated search.");
+        }
+        throw new Error(
+          "Google did not provide readable organic results. " +
+          "Its page layout, consent flow, or access rules may have changed."
+        );
+      }
+
+      return { results, searchesRun: 1 };
     } finally {
       await context.close();
     }
