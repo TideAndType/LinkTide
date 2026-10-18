@@ -151,7 +151,8 @@ async function rememberDirectoryAccess(error: DirectoryAccessError, domain: stri
 }
 
 function accessReport(error: DirectoryAccessError) {
-  const pause = activeDirectoryPause(domainOf(error.url));
+  const pause = activeDirectoryPause(domainOf(error.url)) ??
+    [...directoryPauses.values()].find((entry) => entry.url === error.url && entry.until > Date.now());
   return {
     status: error.statusCode === 429 ? "rate_limited" : "access_denied",
     submitted: false,
