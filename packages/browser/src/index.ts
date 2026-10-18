@@ -417,6 +417,43 @@ export async function findAccountCreationLink(
 }
 
 
+
+/** Parse the server's Retry-After (seconds or RFC HTTP date) without retrying. */
+export function retryAfterSeconds(value: string | null, now = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) ? Math.min(31536000, Math.ceil(seconds)) : undefined;
+  }
+  const retryAt = Date.parse(trimmed);
+  if (!Number.isFinite(retryAt)) return undefined;
+  return Math.min(31536000, Math.max(0, Math.ceil((retryAt - now) / 1000)));
+}
+
+export class DirectoryAccessError extends Error {
+  readonly statusCode: 403 | 429;
+  readonly url: string;
+  readonly retryAfterSeconds?: number;
+
+  constructor(statusCode: 403 | 429, url: string, retryAfter?: number) {
+    const hostname = new URL(url).hostname;
+    const message = statusCode === 429
+      ? hostname + " is rate-limiting directory access (HTTP 429). " +
+        (retryAfter !== undefined
+          ? "Server suggested retry after " + Math.ceil(retryAfter / 60) + " minute(s). "
+          : "No Retry-After time was supplied. ") +
+        "LinkTide will pause this directory; do not repeatedly retry."
+      : hostname + " denied directory access (HTTP 403). " +
+        "LinkTide will pause this directory; do not try to bypass the restriction.";
+    super(message);
+    this.name = "DirectoryAccessError";
+    this.statusCode = statusCode;
+    this.url = url;
+    this.retryAfterSeconds = retryAfter;
+  }
+}
+
 export async function inspectOpportunity(
   context: BrowserContext,
   requestedUrl: string
@@ -438,8 +475,13 @@ export async function inspectOpportunity(
         waitUntil: "domcontentloaded",
         timeout: 35_000
       });
-      if (response && [403, 429].includes(response.status())) {
-        throw new Error("Directory refused access (HTTP " + response.status() + ").");
+      if (response && (response.status() === 403 || response.status() === 429)) {
+        const status = response.status() as 403 | 429;
+        throw new DirectoryAccessError(
+          status,
+          page.url(),
+          retryAfterSeconds(response.headers()["retry-after"] ?? null)
+        );
       }
       const finalUrl = page.url();
       const currentHost = new URL(finalUrl).hostname.toLowerCase().replace(/^www\./, "");

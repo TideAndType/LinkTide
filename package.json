@@ -1,6 +1,6 @@
 {
   "name": "linktide",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Local-first backlink discovery, citation management, and guarded directory submission for macOS.",
   "author": {
     "name": "Tide & Type Co.",
