@@ -39,7 +39,7 @@ import {
   type BusinessSubmissionProfile,
   type FieldMapping
 } from "@linktide/form-mapper";
-import { createLmStudioClient } from "@linktide/lm-studio";
+import { createLmStudioClient, readTideBridgeConnection } from "@linktide/lm-studio";
 import {
   applyRecipe,
   buildRecipe,
@@ -1014,6 +1014,41 @@ export async function startWorkerServer() {
           { error: error instanceof Error ? error.message : "Could not save settings." },
           origin
         );
+      }
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/settings/use-tidebridge") {
+      try {
+        const bridge = readTideBridgeConnection();
+        const current = await loadSettings(dataDir());
+        const discovered = await listLoadedLmStudioModels({
+          baseUrl: bridge.baseUrl,
+          apiKey: ""
+        });
+        const models = discovered.status === 200 ? discovered.body.models : [];
+        const model = models.find((item) => item.id === current.lmStudioModel)?.id ??
+          models[0]?.id ?? current.lmStudioModel;
+        const settings = await updateSettings(dataDir(), {
+          lmStudioConnection: "tidebridge",
+          lmStudioModel: model
+        });
+        send(res, 200, {
+          settings,
+          source: bridge.source,
+          description: bridge.description,
+          models,
+          warning: discovered.status !== 200
+            ? "TideBridge's local LM Studio server is not responding. " +
+              "Open LM Studio → Developer → Start Server, then refresh models."
+            : models.length === 0
+              ? "LM Studio responded but no chat models were found. Load a model."
+              : undefined
+        }, origin);
+      } catch (error) {
+        send(res, 500, {
+          error: error instanceof Error ? error.message : "Could not use TideBridge connection."
+        }, origin);
       }
       return;
     }
