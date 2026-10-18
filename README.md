@@ -49,6 +49,14 @@ Because macOS requires a properly signed app for true in-place automatic updates
 - Keeps bulk account creation off and never bypasses CAPTCHA, payment, consent, or verification steps.
 - Learns successful directory mappings for future runs.
 
+### TideBridge shared local AI connection
+
+LinkTide and TideBridge both run on your Mac. LinkTide now defaults to **TideBridge shared connection**, reading TideBridge's saved LM Studio loopback URL from macOS UserDefaults (`com.tideandtype.TideBridge`, key `server`). This uses the same LM Studio server for LinkTide's directory discovery, qualification and form mapping. It does not contact WordPress for each prompt or copy TideBridge's WordPress pairing token from Keychain. No public LM Studio URL, tunnel or VPS is required.
+
+In **Connections**, click **Use TideBridge Local Connection** to reload TideBridge's current local address, discover available models, and select/save a model. TideBridge and LinkTide can use the same running LM Studio process; TideBridge's separate WordPress job queue remains unchanged. If TideBridge isn't installed, LinkTide safely defaults to `http://127.0.0.1:1234/v1`. The shared configuration only accepts loopback HTTP addresses. To override it, choose **Edit local address manually**, change the URL, then Save Settings. Connect LM Studio → Developer → Start Server and load a chat model.
+
+**Important:** TideBridge connects your Mac to WordPress and shares its LM Studio configuration; it does not proxy directory websites or change how third-party websites enforce HTTP 429/403. LinkTide still respects directory access denials and cooldowns.
+
 ### Free directory discovery that does not depend on search engines
 
 After building a discovery plan, click **Find Starter Directories**. LinkTide uses a built-in, curated starting list of known business directories, and adds relevant agency directories when your profile includes services such as web design, SEO, marketing, development or managed IT. This does **not** query a search engine. It is a starting list, **not** a claim of live search results, current open applications, available backlinks, or guaranteed free listings. Review each directory's eligibility, existing listing, terms and membership requirements.

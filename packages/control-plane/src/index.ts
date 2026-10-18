@@ -7,6 +7,8 @@ import {
 } from "@linktide/classifier";
 import { generateDirectoryQueries } from "@linktide/discovery";
 import { createLmStudioClient, lmStudioEndpoint, openAiBaseUrl } from "@linktide/lm-studio";
+import { readTideBridgeConnection } from "../../lm-studio/src/tidebridge";
+export { readTideBridgeConnection } from "../../lm-studio/src/tidebridge";
 import { directoryCatalogResults, importedDirectoryResults, searchGoogleVisibleForm, searchHeadlessChromium, type SearchResult } from "@linktide/search";
 import { generateVaultKey } from "@linktide/vault";
 
@@ -15,6 +17,7 @@ export type LinkTideSettings = {
   lmStudioBaseUrl: string;
   lmStudioModel: string;
   lmStudioApiKey: string;
+  lmStudioConnection: "tidebridge" | "manual";
   vaultKey: string;
   searchMaxQueries: number;
   searchResultsPerQuery: number;
@@ -23,6 +26,7 @@ export type LinkTideSettings = {
 export type PublicSettings = {
   lmStudioBaseUrl: string;
   lmStudioModel: string;
+  lmStudioConnection: "tidebridge" | "manual";
   hasLmStudioApiKey: boolean;
   searchMaxQueries: number;
   searchResultsPerQuery: number;
@@ -62,11 +66,14 @@ const fallbackDirectoryTypes = [
 ];
 
 function defaults(): LinkTideSettings {
+  const bridge = readTideBridgeConnection();
   return {
     version: 1,
-    lmStudioBaseUrl: process.env.LM_STUDIO_BASE_URL ?? "",
+    // New installations use the first-party TideBridge localhost connection.
+    lmStudioBaseUrl: bridge.baseUrl,
     lmStudioModel: process.env.LM_STUDIO_MODEL ?? "",
     lmStudioApiKey: process.env.LM_STUDIO_API_KEY ?? "",
+    lmStudioConnection: "tidebridge",
     vaultKey: process.env.LINKTIDE_VAULT_KEY ?? generateVaultKey(),
     searchMaxQueries: Number(process.env.LINKTIDE_SEARCH_MAX_QUERIES ?? 8),
     searchResultsPerQuery: Number(
@@ -102,6 +109,7 @@ function publicSettings(settings: LinkTideSettings): PublicSettings {
   return {
     lmStudioBaseUrl: settings.lmStudioBaseUrl,
     lmStudioModel: settings.lmStudioModel,
+    lmStudioConnection: settings.lmStudioConnection,
     hasLmStudioApiKey: Boolean(settings.lmStudioApiKey),
     searchMaxQueries: settings.searchMaxQueries,
     searchResultsPerQuery: settings.searchResultsPerQuery
@@ -128,10 +136,17 @@ export async function loadSettings(dataDirectory: string) {
 
     // Preserve previous LM Studio settings and the vault key while dropping
     // the legacy paid search credential from future saved settings.
+    const lmStudioConnection = saved.lmStudioConnection === "manual"
+      ? "manual" : "tidebridge";
     const settings: LinkTideSettings = {
       ...base,
-      lmStudioBaseUrl: typeof saved.lmStudioBaseUrl === "string"
-        ? saved.lmStudioBaseUrl : base.lmStudioBaseUrl,
+      lmStudioConnection,
+      // Upgrades migrate away from stale external Cloudflare/other tunnel
+      // addresses. TideBridge and LinkTide run on this same Mac.
+      lmStudioBaseUrl: lmStudioConnection === "tidebridge"
+        ? readTideBridgeConnection().baseUrl
+        : (typeof saved.lmStudioBaseUrl === "string"
+          ? saved.lmStudioBaseUrl : base.lmStudioBaseUrl),
       lmStudioModel: typeof saved.lmStudioModel === "string"
         ? saved.lmStudioModel : base.lmStudioModel,
       lmStudioApiKey: typeof saved.lmStudioApiKey === "string"
@@ -181,18 +196,26 @@ export async function updateSettings(
     lmStudioBaseUrl: string;
     lmStudioModel: string;
     lmStudioApiKey: string;
+    lmStudioConnection: "tidebridge" | "manual";
     searchMaxQueries: number;
     searchResultsPerQuery: number;
   }>
 ) {
   const current = await loadSettings(dataDirectory);
 
+  const lmStudioConnection = input.lmStudioConnection === "manual"
+    ? "manual"
+    : input.lmStudioConnection === "tidebridge"
+      ? "tidebridge"
+      : current.lmStudioConnection;
   const next: LinkTideSettings = {
     ...current,
-    lmStudioBaseUrl:
-      typeof input.lmStudioBaseUrl === "string"
+    lmStudioConnection,
+    lmStudioBaseUrl: lmStudioConnection === "tidebridge"
+      ? readTideBridgeConnection().baseUrl
+      : (typeof input.lmStudioBaseUrl === "string"
         ? input.lmStudioBaseUrl.trim()
-        : current.lmStudioBaseUrl,
+        : current.lmStudioBaseUrl),
     lmStudioModel:
       typeof input.lmStudioModel === "string"
         ? input.lmStudioModel.trim()
