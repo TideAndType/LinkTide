@@ -77,6 +77,7 @@ type QualifiedOpportunity = {
 
 type SearchRun = {
   provider: string;
+  warning?: string;
   aiUsed: boolean;
   searchesRun: number;
   rawResults: number;
@@ -240,6 +241,7 @@ export function LinkTideDashboard() {
   const [plan, setPlan] = useState<DiscoveryPlan | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchRun, setSearchRun] = useState<SearchRun | null>(null);
+  const [manualDirectoryUrls, setManualDirectoryUrls] = useState("");
   const [activeAutomationId, setActiveAutomationId] = useState<string | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchMessage, setBatchMessage] = useState("");
@@ -642,7 +644,7 @@ export function LinkTideDashboard() {
     }
   }
 
-  async function searchAndQualify() {
+  async function searchAndQualify(source: "catalog" | "chromium" = "catalog") {
     if (!plan?.queries.length) {
       setError("Build a discovery plan before running live search.");
       return;
@@ -664,7 +666,9 @@ export function LinkTideDashboard() {
             services: splitCsv(profile.services),
             locations: splitCsv(profile.locations)
           },
-          queries: plan.queries
+          queries: plan.queries,
+          source,
+          manualUrls: manualDirectoryUrls.split(/[\s,]+/).map((url) => url.trim()).filter(Boolean)
         })
       });
 
@@ -869,7 +873,7 @@ export function LinkTideDashboard() {
         <div className="setupBanner">
           <strong>Finish LinkTide setup</strong>
           <span>
-            Headless Chromium discovery works without any search API key.
+            Starter directory discovery works without a search engine or API key.
             Connect LM Studio in Settings for AI-assisted directory qualification.
           </span>
         </div>
@@ -1048,9 +1052,10 @@ export function LinkTideDashboard() {
                 />
               </label>
               <p className="muted tiny">
-                Search provider: Headless Chromium (free). Searches run on this
-                Mac with a delay between queries; no Brave Search key is needed.
-                If a search site blocks automation, LinkTide stops and reports it.
+                Discovery: Starter directories and URL import are free and
+                work without a search API. Optional headless Chromium search
+                may be blocked by its provider; LinkTide uses the starter
+                list instead and never bypasses restrictions.
               </p>
             </div>
 
@@ -1144,8 +1149,28 @@ export function LinkTideDashboard() {
                   LinkTide runs a limited batch, dedupes domains, then qualifies candidates.
                 </span>
               </div>
-              <button className="primary" onClick={searchAndQualify} type="button" disabled={searching}>
-                {searching ? "Searching & qualifying..." : "Search & Qualify"}
+              <button className="primary" onClick={() => void searchAndQualify("catalog")} type="button" disabled={searching}>
+                {searching ? "Qualifying..." : manualDirectoryUrls.trim() ? "Qualify Pasted URLs" : "Find Starter Directories"}
+              </button>
+            </div>
+
+            <div className="settingsFields">
+              <label>
+                Add your own directory URLs (optional; one per line)
+                <textarea
+                  rows={3}
+                  value={manualDirectoryUrls}
+                  onChange={(event) => setManualDirectoryUrls(event.target.value)}
+                  placeholder={"https://example-directory.com/add-business\nhttps://another-directory.com/"}
+                />
+                <small className="muted">
+                  Pasted links are qualified directly without using any search engine.
+                  Clear this field to use the starter list or optional web search.
+                </small>
+              </label>
+              <button className="secondary" onClick={() => void searchAndQualify("chromium")} type="button"
+                disabled={searching || Boolean(manualDirectoryUrls.trim())}>
+                Try Public Web Search (may be blocked)
               </button>
             </div>
 
@@ -1186,11 +1211,19 @@ export function LinkTideDashboard() {
 
         {!searchRun ? (
           <div className="emptyState">
-            <strong>No live search has run yet.</strong>
-            <p>Build the discovery plan, then click <b>Search &amp; Qualify</b>.</p>
+            <strong>No directory candidates loaded yet.</strong>
+            <p>Build a plan, then choose <b>Find Starter Directories</b> or paste listing URLs.</p>
           </div>
         ) : (
           <>
+            {searchRun.warning ? (
+              <div className="batchBanner">{searchRun.warning}</div>
+            ) : null}
+            <p className="tiny muted">
+              Source: {searchRun.provider === "catalog" ? "Curated starter list (not live search)" :
+                searchRun.provider === "manual" ? "URLs supplied by you" :
+                "Public browser search"}. Review listing eligibility and submission requirements.
+            </p>
             {batchMessage ? (
               <div className={batchRunning ? "batchBanner active" : "batchBanner"}>
                 {batchMessage}
