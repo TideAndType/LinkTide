@@ -117,5 +117,3 @@ export function createLmStudioClient(config: LmStudioConfig) {
 
   return { chat, json };
 }
-
-export { readTideBridgeConnection, normalizeTideBridgeServer, DEFAULT_TIDEBRIDGE_LM_STUDIO } from "./tidebridge";
